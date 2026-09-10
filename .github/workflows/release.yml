@@ -1,0 +1,82 @@
+name: Release
+
+# Publishing is driven by a version tag, so the git history and the registry
+# agree on what shipped. `workflow_dispatch` is here for a re-run after a
+# partial failure; it publishes whatever version package.json currently holds.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write # create the GitHub release
+  id-token: write # npm trusted publishing + provenance
+
+jobs:
+  publish:
+    name: publish to npm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Note: no `registry-url` on purpose. actions/setup-node would write an
+      # .npmrc containing `_authToken=${NODE_AUTH_TOKEN}`; with no such secret
+      # that expands to an empty bearer token and the publish can fail before
+      # npm gets a chance to exchange the OIDC token. The default registry is
+      # already registry.npmjs.org, so nothing is lost by omitting it.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Make sure the npm CLI supports trusted publishing
+        # Trusted publishing needs npm >= 11.5.1; the npm bundled with Node 22
+        # is older.
+        run: |
+          npm install -g npm@latest
+          npm --version
+
+      - name: Check the tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag v$tag does not match package.json version $pkg"
+            exit 1
+          fi
+          echo "tag v$tag matches package.json"
+
+      - name: Run the self-test
+        run: npm test
+
+      - name: Pack once and inspect what would ship
+        run: |
+          npm pack --dry-run
+          echo "--- asserting no Minecraft assets are in the tarball ---"
+          if tar -tzf "$(npm pack --silent)" | grep -Ei '\.(ogg|mp3|wav|png|jpg|jpeg)$'; then
+            echo "::error::the tarball contains binary assets"
+            exit 1
+          fi
+          echo "tarball is code-only"
+
+      - name: Publish
+        # No NODE_AUTH_TOKEN: npm exchanges the GitHub OIDC token for a
+        # short-lived registry token. Provenance is turned on automatically
+        # when the repository is public and the package is public.
+        #
+        # If trusted publishing is not configured yet, remove the id-token
+        # permission above and pass a granular access token instead:
+        #   env:
+        #     NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish
+
+      - name: Create the GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag --title "$GITHUB_REF_NAME"

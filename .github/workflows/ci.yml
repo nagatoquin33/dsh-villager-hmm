@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# The package has no dependencies, so there is nothing to install and no
+# lockfile to restore — the tests run directly against the checked-out source.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Show the toolchain
+        run: node --version
+
+      - name: Run the self-test
+        run: npm test
+
+      - name: Fail if anything named like a Minecraft asset is committed
+        # The repository must never carry Mojang material; this is the guard
+        # that keeps a future commit from quietly adding it back.
+        run: |
+          set -euo pipefail
+          found="$(git ls-files | grep -Ei '\.(ogg|mp3|wav|png|jpg|jpeg|gif|webp)$' || true)"
+          if [ -n "$found" ]; then
+            echo "::error::binary asset(s) committed: $found"
+            exit 1
+          fi
+          echo "no binary assets tracked"
+
+      - name: Verify the manifest npm and the catalog read
+        # The community catalog's static review checks exactly this: a
+        # non-empty dsh.bundle.patch, and that the patch file exists.
+        run: |
+          set -euo pipefail
+          patch="$(node -p "require('./package.json').dsh.bundle.patch")"
+          test -n "$patch" || { echo "::error::dsh.bundle.patch is empty"; exit 1; }
+          test -f "$patch" || { echo "::error::dsh.bundle.patch points at a missing file: $patch"; exit 1; }
+          echo "dsh.bundle.patch -> $patch"

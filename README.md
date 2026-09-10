@@ -183,6 +183,43 @@ incrementing per frame, boundary and false-positive cases, chunk-size
 invariance, config changes, the route surface, a populated and an empty asset
 cache, that no assets are bundled, and the client bundle's materialization.
 
+## Releasing
+
+CI (`.github/workflows/ci.yml`) runs the tests on every push and pull request
+against Node 22 and 24. It also fails the build if a binary asset is ever
+tracked, or if `dsh.bundle.patch` stops resolving — the two things this
+repository must not get wrong.
+
+Publishing is tag-driven:
+
+```sh
+npm version patch        # or minor / major — commits and creates the tag
+git push --follow-tags
+```
+
+`.github/workflows/release.yml` then checks the tag against `package.json`,
+runs the tests, asserts the tarball carries no Minecraft assets, publishes to
+npm, and opens a GitHub release.
+
+**One-time setup — trusted publishing.** No npm token is stored anywhere. The
+workflow authenticates with a GitHub OIDC token that npm exchanges for a
+short-lived registry token, and provenance is attached automatically because
+both the repository and the package are public:
+
+```sh
+npm login
+npm trust github dsh-villager-hmm --file release.yml --repo nagatoquin33/dsh-villager-hmm -y
+npm trust list dsh-villager-hmm      # verify
+```
+
+If `npm trust` refuses because the package does not exist yet, publish once by
+hand (`npm publish`) and run the command above afterwards — every later release
+goes through CI.
+
+Prefer a long-lived token instead? Drop the `id-token: write` permission, add
+an automation token as the `NPM_TOKEN` repository secret, and uncomment the
+`env:` block on the Publish step.
+
 ## License
 
 The code is MIT (see `LICENSE`).
