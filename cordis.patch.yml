@@ -1,0 +1,15 @@
+# Bundle patch for dsh-villager-hmm.
+#
+# Inserted as a profile bundle layer, this adds the plugin's row to the
+# composed tree. Optional row config (uncomment to override the defaults):
+#
+#   - insert:
+#       - id: dsh-villager-hmm
+#         name: 'dsh-villager-hmm'
+#         config:
+#           enabled: true
+#           mode: both          # 'reasoning' | 'both'
+#           pattern: '(?<![0-9A-Za-z])(?:h+m+|mhm+|m{2,})|[嗯唔哼呃]'
+- insert:
+    - id: dsh-villager-hmm
+      name: 'dsh-villager-hmm'

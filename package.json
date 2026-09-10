@@ -1,0 +1,67 @@
+{
+  "name": "dsh-villager-hmm",
+  "version": "1.0.0",
+  "description": "Plays a vanilla Minecraft villager \"hmm\" whenever the model hums inside its reasoning chain.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nagatoquin33/dsh-villager-hmm.git"
+  },
+  "homepage": "https://github.com/nagatoquin33/dsh-villager-hmm#readme",
+  "bugs": {
+    "url": "https://github.com/nagatoquin33/dsh-villager-hmm/issues"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./client/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "client",
+    "assets",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [],
+      "immediately": true
+    }
+  },
+  "scripts": {
+    "test": "node test/self-test.mjs"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "dsh-plugin",
+    "cordis",
+    "minecraft",
+    "villager",
+    "tts",
+    "reasoning"
+  ]
+}
