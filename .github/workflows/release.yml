@@ -21,14 +21,14 @@ jobs:
     name: publish to npm
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Note: no `registry-url` on purpose. actions/setup-node would write an
       # .npmrc containing `_authToken=${NODE_AUTH_TOKEN}`; with no such secret
       # that expands to an empty bearer token and the publish can fail before
       # npm gets a chance to exchange the OIDC token. The default registry is
       # already registry.npmjs.org, so nothing is lost by omitting it.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
 
