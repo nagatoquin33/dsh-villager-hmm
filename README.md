@@ -2,47 +2,88 @@
 
 A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin.
 Whenever the model goes *"hmm"* — inside its chain of thought, or in the reply
-itself — a vanilla Minecraft villager hums back at you.
+itself — a Minecraft villager hums back at you.
 
-A small floating villager sits in the bottom-right corner, bobs its head on
-every hit, and carries the controls: pause, volume, which stream to watch, and
-the matcher itself.
+A small villager sits in the bottom-right corner, bobs its head on every hit,
+and carries the controls: pause, volume, which stream to watch, and the matcher
+itself.
 
 ```
-思维链 1284 字 · 正文 356 字 · 音效 2 段
-[ 监听中 · 点击暂停 ]  [ 试听一次 ]  音量 ────●────
+🧑‍🌾 村民 hmm 音效                    触发 12 · 播放 12   －
+   思维链 1284 字   正文 356 字   音效 2 段
+   [ 监听中 · 点击暂停 ]  [ 试听一次 ]   音量 ────●────
+   检测源 [ 仅思维链 ▾ ]
+   匹配式 [(?<![0-9A-Za-z])(?:h+m+|mhm+|m{2,})|[嗯唔哼呃] ] [应用] [默认]
+   最近命中  hmm  嗯  唔
 ```
 
 ## Install
 
 ```sh
-# 1. install the package into your profile (web is the browser profile)
+# 1. install the package into your profile
 dsh plugin --profile web add dsh-villager-hmm
+```
 
-# 2. register it as a profile bundle — add the name to the `dsh.profile.bundles`
-#    array in  $DSH_HOME/profiles/web/package.json
+```jsonc
+// 2. register it as a profile bundle — add the name to the
+//    `dsh.profile.bundles` array in $DSH_HOME/profiles/web/package.json
+"dsh": { "profile": { "bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "dsh-villager-hmm"] } }
+```
+
+```sh
+# 3. fetch the sounds and the villager texture (see Assets below)
+npx dsh-villager-hmm-assets
 ```
 
 The package ships its own `cordis.patch.yml`, so step 2 is what actually
-inserts the plugin row. After editing, restart the profile.
+inserts the plugin row. Restart the profile after editing.
+
+Skip step 2 and nothing happens; skip step 3 and the plugin loads, shows its
+panel, and tells you which command to run — it never fails silently.
 
 <details>
 <summary>Installing from a local checkout instead of npm</summary>
 
 ```sh
-git clone <this repo> && cd dsh-villager-hmm
+git clone https://github.com/nagatoquin33/dsh-villager-hmm && cd dsh-villager-hmm
 dsh plugin --profile web add "$PWD"
 ```
-Then do step 2 as above.
+
+Note that a path containing spaces breaks pnpm's argument handling — install
+from a space-free directory.
 </details>
 
-## Uninstall
+## Assets
 
-Remove the name from `dsh.profile.bundles`, then:
+**This package ships no Minecraft material.** The two villager sounds and the
+villager skin are fetched on your machine into a per-user cache:
+
+```
+$DSH_HOME/.dsh-villager-hmm/assets/
+  idle1.ogg      villager "hmm"
+  idle2.ogg      villager "hmm", second take
+  villager.png   the 64x64 villager skin; the panel crops the head front in CSS
+```
+
+`npx dsh-villager-hmm-assets` (or `node scripts/fetch-assets.mjs`) populates it.
+Two sources are supported:
+
+| Flag | Meaning |
+| --- | --- |
+| *(none)* | Download from a public mirror of the vanilla 1.21.4 client assets |
+| `--from <dir>` | Copy from an asset tree you extracted yourself — **the option that matches the game's terms** |
+| `--base <url>` | Your own mirror with the same layout |
+| `--dir <path>` | Use a different cache directory |
+| `--force` | Re-fetch files that are already there |
 
 ```sh
-dsh plugin --profile web remove dsh-villager-hmm
+# from your own extraction
+npx dsh-villager-hmm-assets --from "C:/mc-extract/assets/minecraft"
 ```
+
+The cache lives outside `node_modules`, so it survives plugin upgrades. The
+host half re-reads it per request, which means running the fetch script takes
+effect on a page reload — no harness restart.
 
 ## Configuration
 
@@ -57,9 +98,10 @@ Defaults live in the row. To override them, replace the insert in your own
         enabled: true
         mode: both      # 'reasoning' (chain of thought only) | 'both'
         pattern: '(?<![0-9A-Za-z])(?:h+m+|mhm+|m{2,})|[嗯唔哼呃]'
+        assetDir: 'D:/my-assets'
 ```
 
-Everything here is also editable from the floating panel while it runs.
+Everything except `assetDir` is also editable from the floating panel.
 
 `mode` defaults to `both` on purpose: plenty of models expose no separate
 reasoning channel, and a plugin that silently does nothing looks broken. Switch
@@ -112,13 +154,11 @@ finishing, so `hm` is never counted before the next delta can turn it into
 ## Layout
 
 ```
-lib/index.js          host half — event listener + HTTP routes
-client/client.js      browser half — prebuilt __ModuleLoader__ bundle
-assets/idle1.ogg      villager "hmm"
-assets/idle2.ogg      villager "hmm", second take
-assets/villager-face.png  villager head front, cropped 10x10 from the vanilla texture
-cordis.patch.yml      the row this package inserts
-test/self-test.mjs    unit + integration tests
+lib/index.js              host half — event listener + HTTP routes
+client/client.js          browser half — prebuilt __ModuleLoader__ bundle
+scripts/fetch-assets.mjs  the asset fetcher (also the package's bin)
+cordis.patch.yml          the row this package inserts
+test/self-test.mjs        unit + integration tests
 ```
 
 ## Routes
@@ -127,29 +167,27 @@ The plugin owns one HTTP prefix, `/dsh-villager-hmm`:
 
 | Route | Purpose |
 | --- | --- |
-| `GET /state?cursor=N` | counters + triggers newer than `N` |
+| `GET /state?cursor=N` | counters, asset status, and triggers newer than `N` |
 | `GET /config?enabled&mode&pattern` | change settings at runtime |
-| `GET /sound/<n>.ogg` | the audio |
-| `GET /face.png` | the villager face |
+| `GET /sound/<n>.ogg` | the audio, read from the cache |
+| `GET /texture.png` | the villager skin, read from the cache |
 
 ## Tests
 
 ```sh
-node test/self-test.mjs
+npm test
 ```
 
-Covers the scanner against character-by-character streams with `revision`
-incrementing per frame, boundary and false-positive cases, config changes, the
-route surface, and the client bundle's materialization.
+24 cases: the scanner against character-by-character streams with `revision`
+incrementing per frame, boundary and false-positive cases, chunk-size
+invariance, config changes, the route surface, a populated and an empty asset
+cache, that no assets are bundled, and the client bundle's materialization.
 
-## Assets and licensing
+## License
 
-The **code** is MIT (see `LICENSE`).
+The code is MIT (see `LICENSE`).
 
-`assets/idle1.ogg`, `assets/idle2.ogg` and `assets/villager-face.png` are
-**Mojang assets**, taken from the vanilla 1.21.4 client
-(`assets/minecraft/sounds/mob/villager/idle*.ogg`, and the head-front region of
-`assets/minecraft/textures/entity/villager/villager.png`). They are **not**
-covered by the MIT license, they remain Mojang's property, and this package
-ships them for local personal use only. Do not redistribute them commercially,
-and swap in your own audio before publishing a fork.
+No third-party assets are bundled or redistributed: `scripts/fetch-assets.mjs`
+downloads them on the operator's machine, at the operator's direction, into a
+local cache. Minecraft is a trademark of Mojang Studios; this project is not
+affiliated with or endorsed by Mojang or Microsoft.

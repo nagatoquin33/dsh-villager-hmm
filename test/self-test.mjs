@@ -7,10 +7,15 @@
  * harness does — and mistaking it for a stream identity is the bug that made
  * an earlier revision of this plugin count zero hits.
  *
+ * Assets are fixtures here: the package ships no Mojang material, so the tests
+ * cover both a populated cache directory and an empty one.
+ *
  * Run: node test/self-test.mjs
  */
 import { strict as assert } from 'node:assert'
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 let passed = 0
 let failed = 0
@@ -24,6 +29,29 @@ const check = (label, fn) => {
     console.log('  FAIL  ' + label + '\n        ' + (error && error.message))
   }
 }
+
+/** Build a minimal but structurally valid PNG of the given size. */
+const makePng = (width, height) => {
+  const ihdr = Buffer.alloc(8)
+  ihdr.writeUInt32BE(width, 0)
+  ihdr.writeUInt32BE(height, 4)
+  return Buffer.concat([
+    Buffer.from('89504e470d0a1a0a', 'hex'), // signature
+    Buffer.from([0, 0, 0, 13]), // IHDR length
+    Buffer.from('IHDR', 'latin1'),
+    ihdr, // width at offset 16, height at offset 20
+    Buffer.from([8, 6, 0, 0, 0]),
+  ])
+}
+const makeOgg = () => Buffer.concat([Buffer.from('OggS', 'latin1'), Buffer.alloc(2048)])
+
+// A populated cache: the layout scripts/fetch-assets.mjs produces.
+const cacheDir = mkdtempSync(join(tmpdir(), 'vhm-assets-'))
+writeFileSync(join(cacheDir, 'idle1.ogg'), makeOgg())
+writeFileSync(join(cacheDir, 'idle2.ogg'), makeOgg())
+writeFileSync(join(cacheDir, 'villager.png'), makePng(64, 64))
+// An empty cache: the state a fresh install is in before the fetch script runs.
+const emptyDir = mkdtempSync(join(tmpdir(), 'vhm-empty-'))
 
 /** Build a fake cordis host context plus the recorder for its effects. */
 const makeContext = () => {
@@ -43,9 +71,21 @@ const makeContext = () => {
   record.ctx = {
     on: (name, fn) => { record.handlers[name] = fn },
     inject: (deps, cb) => { record.injected.push(deps); cb(hostCtx) },
-    logger: { info: () => {} },
+    logger: { info: () => {}, warn: () => {} },
   }
   return record
+}
+
+/** Call a route handler on a recording with a synthetic request. */
+const callOn = (recording, path) => {
+  let status = 0
+  let body = null
+  const res = {
+    writeHead(code) { status = code; return res },
+    end(chunk) { body = chunk },
+  }
+  recording.routes[0].handler({ url: path, method: 'GET' }, res)
+  return { status, body }
 }
 
 // ------------------------------------------------------------------ host half
@@ -57,21 +97,45 @@ check('exports a cordis plugin shape', () => {
   assert.equal(mod.name, 'dsh-villager-hmm')
   assert.equal(typeof mod.apply, 'function')
   assert.equal(typeof mod.DEFAULT_PATTERN, 'string')
+  assert.deepEqual(mod.SOUND_FILES, ['idle1.ogg', 'idle2.ogg'])
+})
+
+check('has no bundled assets in the package tree', () => {
+  // The repository must never carry Mojang material.
+  assert.throws(() => readFileSync(new URL('../assets/idle1.ogg', import.meta.url)), /ENOENT/)
 })
 
 check('defaults to scanning both channels', () => {
   // A model with no reasoning channel must still work out of the box.
   const bare = makeContext()
-  mod.apply(bare.ctx, {})
+  mod.apply(bare.ctx, { assetDir: emptyDir })
   const state = JSON.parse(String(callOn(bare, '/dsh-villager-hmm/state?cursor=0').body))
   assert.equal(state.mode, 'both')
   assert.equal(state.enabled, true)
   assert.equal(state.pattern, mod.DEFAULT_PATTERN)
 })
 
+check('resolves the asset directory from the harness home', () => {
+  const dir = mod.assetDirFor({}, { DSH_HOME: 'X:/dsh-home' })
+  assert.equal(dir, join('X:/dsh-home', mod.CACHE_DIR, 'assets'))
+  assert.equal(mod.assetDirFor({ assetDir: 'Y:/custom' }, {}), 'Y:/custom')
+})
+
+check('reports a missing asset set instead of failing', () => {
+  const bare = makeContext()
+  mod.apply(bare.ctx, { assetDir: emptyDir })
+  const state = JSON.parse(String(callOn(bare, '/dsh-villager-hmm/state?cursor=0').body))
+  assert.equal(state.soundCount, 0)
+  assert.equal(state.hasTexture, false)
+  assert.equal(typeof state.setupCommand, 'string')
+  assert.ok(state.setupCommand.length > 0, 'the panel needs a command to show')
+  assert.equal(callOn(bare, '/dsh-villager-hmm/sound/0.ogg').status, 404)
+  assert.equal(callOn(bare, '/dsh-villager-hmm/texture.png').status, 404)
+})
+
 // The scanning suite runs in reasoning-only mode so each case is isolated.
 const rec = makeContext()
-mod.apply(rec.ctx, { mode: 'reasoning' })
+mod.apply(rec.ctx, { mode: 'reasoning', assetDir: cacheDir })
 
 check('subscribes to the assistant stream', () => {
   assert.equal(typeof rec.handlers['agent/assistant-stream'], 'function')
@@ -83,17 +147,6 @@ check('injects webServer and registers one prefix route', () => {
   assert.equal(rec.routes[0].path, '/dsh-villager-hmm')
 })
 
-/** Call a route handler on a given recording with a synthetic request. */
-function callOn(recording, path) {
-  let status = 0
-  let body = null
-  const res = {
-    writeHead(code) { status = code; return res },
-    end(chunk) { body = chunk },
-  }
-  recording.routes[0].handler({ url: path, method: 'GET' }, res)
-  return { status, body }
-}
 const call = (path) => callOn(rec, path)
 const getJson = (path) => JSON.parse(String(call(path).body))
 
@@ -123,11 +176,8 @@ const streamText = (text) => { for (const ch of text) emitDelta('reasoning-delta
 const streamReply = (text) => { for (const ch of text) emitDelta('text-delta', ch) }
 const endAttempt = () => emitFrame({ type: 'end', attemptId: attempt, revision, index: 0, outcome: { kind: 'committed', eventType: 'assistant/message', seq: 1 } })
 
-/**
- * Drain everything pending and return the trigger words. Reading with a huge
- * cursor would observe without consuming; this deliberately consumes so each
- * case starts clean.
- */
+/** Drain everything pending and return the trigger words. */
+let lastCursor = 0
 const takeWords = () => {
   const seen = []
   for (let guard = 0; guard < 20; guard += 1) {
@@ -138,15 +188,14 @@ const takeWords = () => {
   }
   return seen
 }
-let lastCursor = 0
 
+let caseId = 0
 const runCase = (text, stream = streamText) => {
   startAttempt('attempt-' + (++caseId))
   stream(text)
   endAttempt()
   return takeWords()
 }
-let caseId = 0
 
 check('counts hmm split one character per frame', () => {
   const words = runCase('Hmm, let me think about that.')
@@ -181,22 +230,24 @@ check('is unaffected by chunk size', () => {
   assert.deepEqual(runCase('Hmm, and hmm again 嗯', pairs).map((w) => w.toLowerCase()), ['hmm', 'hmm', '嗯'])
 })
 
-check('serves both ogg sounds with the right magic', () => {
+check('serves the fetched assets with the right magic', () => {
   for (const index of [0, 1]) {
     const { status, body } = call('/dsh-villager-hmm/sound/' + index + '.ogg')
     assert.equal(status, 200)
     assert.equal(body.subarray(0, 4).toString('latin1'), 'OggS', 'sound ' + index + ' is not an Ogg stream')
-    assert.ok(body.length > 1000)
   }
+  const texture = call('/dsh-villager-hmm/texture.png')
+  assert.equal(texture.status, 200)
+  assert.equal(texture.body.subarray(0, 8).toString('hex'), '89504e470d0a1a0a', 'not a PNG')
+  // The client crops the head front out of this 64x64 skin.
+  assert.equal(texture.body.readUInt32BE(16), 64)
+  assert.equal(texture.body.readUInt32BE(20), 64)
 })
 
-check('serves the villager face as a 10x10 PNG', () => {
-  const { status, body } = call('/dsh-villager-hmm/face.png')
-  assert.equal(status, 200)
-  assert.equal(body.subarray(0, 8).toString('hex'), '89504e470d0a1a0a', 'not a PNG')
-  // The cropped head-front region of the vanilla villager texture.
-  assert.equal(body.readUInt32BE(16), 10)
-  assert.equal(body.readUInt32BE(20), 10)
+check('reports the fetched asset set', () => {
+  const state = getJson('/dsh-villager-hmm/state?cursor=999999')
+  assert.equal(state.soundCount, 2)
+  assert.equal(state.hasTexture, true)
 })
 
 check('rejects unknown routes and out-of-range sounds', () => {
@@ -263,7 +314,6 @@ check('materializes into a cordis client plugin', () => {
 
 check('apply() polls the host and registers the overlay slot', () => {
   const registrations = []
-  let intervals = 0
   const clientCtx = {
     effect: (fn) => { fn(); return () => {} },
     slots: {
@@ -277,7 +327,7 @@ check('apply() polls the host and registers the overlay slot', () => {
   }
   const exportsObject = entry.factory((spec) => (spec === 'react' ? FakeReact : null))
   const originalSetInterval = globalThis.setInterval
-  globalThis.setInterval = () => { intervals += 1; return 0 }
+  globalThis.setInterval = () => 0
   try {
     exportsObject.apply(clientCtx)
   } finally {

@@ -41,7 +41,9 @@ window.__ModuleLoader__.load({
       textChars: 0,
       recent: [],
       soundCount: 0,
-      hasFace: false,
+      hasTexture: false,
+      assetDir: '',
+      setupCommand: 'npx dsh-villager-hmm-assets',
       blocked: false,
       volume: 0.7,
       open: true,
@@ -147,7 +149,9 @@ window.__ModuleLoader__.load({
           textChars: data.textChars,
           recent: Array.isArray(data.recent) ? data.recent.slice(-8) : [],
           soundCount: data.soundCount,
-          hasFace: data.hasFace === true,
+          hasTexture: data.hasTexture === true,
+          assetDir: typeof data.assetDir === 'string' ? data.assetDir : '',
+          setupCommand: typeof data.setupCommand === 'string' ? data.setupCommand : state.setupCommand,
           patternError: data.patternError ? String(data.patternError) : null,
           defaultPattern: typeof data.defaultPattern === 'string' ? data.defaultPattern : state.defaultPattern,
         }
@@ -187,13 +191,13 @@ window.__ModuleLoader__.load({
 
     function Overlay() {
       const s = useStore()
-      const face = s.hasFace
+      const face = s.hasTexture
         ? h('div', {
             // A fresh key remounts the node so the CSS animation replays.
             key: 'face-' + s.hitSeq,
             className: 'vhm-face' + (s.hitSeq > 0 ? ' vhm-face-hit' : ''),
           })
-        : h('div', { className: 'vhm-face vhm-face-missing' }, '?')
+        : h('div', { className: 'vhm-face vhm-face-missing', title: '贴图未获取' }, '?')
 
       return h('div', { className: 'vhm-ov' + (s.open ? '' : ' vhm-ov-min') },
         h('div', { className: 'vhm-bar' },
@@ -210,6 +214,14 @@ window.__ModuleLoader__.load({
           s.ready
             ? null
             : h('div', { className: 'vhm-hint' }, '正在连接宿主…'),
+          s.soundCount === 0
+            ? h('div', { className: 'vhm-setup' },
+                h('div', { className: 'vhm-err' }, '音效素材尚未获取，暂时不会出声。'),
+                h('div', { className: 'vhm-hint' }, '在 profile 目录下执行：'),
+                h('code', { className: 'vhm-cmd' }, s.setupCommand),
+                s.assetDir ? h('div', { className: 'vhm-hint' }, '缓存目录 ' + s.assetDir) : null,
+              )
+            : null,
           h('div', { className: 'vhm-stats' },
             h('span', null, '思维链 ', h('b', null, String(s.reasoningChars)), ' 字'),
             h('span', null, '正文 ', h('b', null, String(s.textChars)), ' 字'),
@@ -322,8 +334,11 @@ const CSS = [
   'color:var(--dsw-alias-label-primary);font-size:13px;line-height:1.55;overflow:hidden;}',
   '.vhm-ov-min{width:auto;}',
   '.vhm-bar{display:flex;align-items:center;gap:9px;padding:7px 10px;background:var(--dsw-alias-bg-layer-2);}',
-  '.vhm-face{width:34px;height:34px;flex:none;border-radius:7px;image-rendering:pixelated;',
-  'background-image:url("/dsh-villager-hmm/face.png");background-size:100% 100%;',
+  '.vhm-face{width:30px;height:30px;flex:none;border-radius:7px;image-rendering:pixelated;',
+  // The fetched villager.png is the full 64x64 skin; the head front face sits
+  // at (7,8) 10x10, so scale 3 puts it at 192px with a -21/-24px offset.
+  'background-image:url("/dsh-villager-hmm/texture.png");background-repeat:no-repeat;',
+  'background-size:192px 192px;background-position:-21px -24px;',
   'box-shadow:inset 0 0 0 1px var(--dsw-alias-border-l1);transform-origin:50% 80%;}',
   '.vhm-face-missing{display:flex;align-items:center;justify-content:center;background:var(--dsw-alias-bg-layer-1);',
   'color:var(--dsw-alias-label-secondary);font-size:16px;}',
@@ -359,6 +374,11 @@ const CSS = [
   'color:var(--dsw-alias-label-primary);}',
   '.vhm-range{flex:1;min-width:110px;accent-color:var(--dsw-alias-brand-primary);}',
   '.vhm-hint{font-size:11px;color:var(--dsw-alias-label-secondary);}',
+  '.vhm-setup{display:flex;flex-direction:column;gap:4px;padding:8px 10px;border-radius:8px;',
+  'background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-state-warn-primary);}',
+  '.vhm-cmd{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;padding:3px 7px;',
+  'border-radius:6px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);',
+  'word-break:break-all;}',
   '.vhm-err{font-size:11px;color:var(--dsw-alias-state-error-primary);word-break:break-all;}',
   '.vhm-words{display:flex;gap:6px;flex-wrap:wrap;}',
   '.vhm-word{font-size:11px;padding:1px 7px;border-radius:6px;background:var(--dsw-alias-bg-layer-2);',

@@ -22,19 +22,13 @@ SOFTWARE.
 
 ---
 
-NOTICE ON BUNDLED ASSETS
+NOTICE ON THIRD-PARTY ASSETS
 
-The MIT grant above covers the source code in this package only.
+This package bundles and redistributes no third-party assets.
 
-The files under assets/ are Mojang assets extracted from the vanilla Minecraft
-Java Edition 1.21.4 client:
+scripts/fetch-assets.mjs downloads the Minecraft villager sounds and the
+villager skin onto the operator's own machine, at the operator's direction,
+into a local cache outside this package. Those files are the property of
+Mojang Studios / Microsoft and are not covered by the MIT grant above; they
+are never part of this package's source tree, tarball, or repository.
 
-  assets/idle1.ogg, assets/idle2.ogg
-      -> assets/minecraft/sounds/mob/villager/idle1.ogg, idle2.ogg
-  assets/villager-face.png
-      -> head-front region of assets/minecraft/textures/entity/villager/villager.png
-
-They are the property of Mojang Studios / Microsoft, are not licensed under the
-MIT terms above, and are included for local personal use. Redistributing them
-commercially, or publishing a fork that bundles them, is not permitted by this
-license. Replace them with your own audio and artwork before doing so.

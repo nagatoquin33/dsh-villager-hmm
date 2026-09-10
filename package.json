@@ -22,11 +22,14 @@
   "files": [
     "lib",
     "client",
-    "assets",
+    "scripts",
     "cordis.patch.yml",
     "README.md",
     "LICENSE"
   ],
+  "bin": {
+    "dsh-villager-hmm-assets": "./scripts/fetch-assets.mjs"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
@@ -38,7 +41,8 @@
     }
   },
   "scripts": {
-    "test": "node test/self-test.mjs"
+    "test": "node test/self-test.mjs",
+    "fetch-assets": "node scripts/fetch-assets.mjs"
   },
   "publishConfig": {
     "access": "public"
