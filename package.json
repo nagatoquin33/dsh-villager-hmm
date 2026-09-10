@@ -1,6 +1,6 @@
 {
   "name": "dsh-villager-hmm",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Plays a vanilla Minecraft villager \"hmm\" whenever the model hums inside its reasoning chain.",
   "license": "MIT",
   "repository": {
