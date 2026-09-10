@@ -329,6 +329,7 @@ check('apply() polls the host and registers the overlay slot', () => {
   const registrations = []
   const clientCtx = {
     effect: (fn) => { fn(); return () => {} },
+    get: () => undefined,
     slots: {
       inject: (key, cb) => { cb(); return () => {} },
       register: (options, component) => {
@@ -631,7 +632,10 @@ check('accepts a code-only tarball', () => {
 })
 
 check('LICENSE is verbatim MIT, so GitHub detects it as MIT', () => {
+  // Normalize line endings first: git checks the file out with CRLF on Windows,
+  // and that alone failed this check on the Windows runner while Linux passed.
   const text = readFileSync(new URL('../LICENSE', import.meta.url), 'utf8')
+    .replace(/\r\n/g, '\n')
   // GitHub detects a license by matching LICENSE against known templates. Any
   // appended text — the asset notice used to live here — makes it report
   // "Other" with spdx_id NOASSERTION instead of MIT.
