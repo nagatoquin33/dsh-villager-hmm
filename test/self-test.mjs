@@ -444,6 +444,59 @@ await checkAsync('clicking again re-enables the host', async () => {
   assert.ok(configs[1].includes('enabled=1'), 'second click should re-enable: ' + configs[1])
 })
 
+await checkAsync('the panel can be dragged clear of the composer', async () => {
+  const { Panel, walk } = renderPanel()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  const bar = walk(Panel({})).find((node) => node.props.className === 'vhm-bar')
+  assert.ok(bar, 'the drag bar was not found')
+  assert.equal(typeof bar.props.onPointerDown, 'function', 'the bar is not draggable')
+
+  // Grab at (120,60) with the panel's top-left at (100,50): offset 20,10.
+  bar.props.onPointerDown({
+    target: null,
+    currentTarget: { getBoundingClientRect: () => ({ left: 100, top: 50 }), setPointerCapture: () => {} },
+    clientX: 120, clientY: 60, pointerId: 1,
+  })
+  bar.props.onPointerMove({ clientX: 300, clientY: 200 })
+  bar.props.onPointerUp({ currentTarget: { releasePointerCapture: () => {} }, pointerId: 1 })
+
+  const placed = Panel({}).props.style
+  assert.ok(placed, 'a dragged panel must carry an inline position')
+  assert.equal(placed.left, '280px', 'expected left 280px, got ' + JSON.stringify(placed))
+  assert.equal(placed.top, '190px', 'expected top 190px, got ' + JSON.stringify(placed))
+  // The stylesheet anchor must be released or both would apply.
+  assert.equal(placed.right, 'auto')
+  assert.equal(placed.bottom, 'auto')
+})
+
+await checkAsync('double-clicking the bar restores the default corner', async () => {
+  const { Panel, walk } = renderPanel()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  const bar = walk(Panel({})).find((node) => node.props.className === 'vhm-bar')
+  bar.props.onPointerDown({
+    target: null,
+    currentTarget: { getBoundingClientRect: () => ({ left: 0, top: 0 }), setPointerCapture: () => {} },
+    clientX: 10, clientY: 10, pointerId: 1,
+  })
+  bar.props.onPointerMove({ clientX: 200, clientY: 200 })
+  bar.props.onPointerUp({ currentTarget: { releasePointerCapture: () => {} }, pointerId: 1 })
+  assert.ok(Panel({}).props.style, 'expected a pinned position first')
+  bar.props.onDoubleClick()
+  assert.equal(Panel({}).props.style, null, 'double-click must clear the pinned position')
+})
+
+await checkAsync('the default anchor is not the bottom-right corner', async () => {
+  const { Panel } = renderPanel()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  // No inline position by default, so the stylesheet decides. The composer is
+  // full-width, which is why the default must not be bottom-anchored.
+  assert.equal(Panel({}).props.style, null, 'the default must come from the stylesheet')
+  assert.ok(
+    !/\.vhm-ov\{[^}]*bottom:/.test(source),
+    'the overlay stylesheet must not bottom-anchor the panel over the composer',
+  )
+})
+
 console.log('')
 console.log(passed + ' passed, ' + failed + ' failed')
 process.exitCode = failed === 0 ? 0 : 1

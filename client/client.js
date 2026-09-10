@@ -79,6 +79,7 @@ window.__ModuleLoader__.load({
       volume: 0.7,
       open: true,
       hitSeq: 0,
+      pos: null,
     }
 
     const notify = () => {
@@ -218,6 +219,83 @@ window.__ModuleLoader__.load({
       }
     }
 
+    // ------------------------------------------------------------ placement
+
+    /**
+     * Where the panel sits. The default is the top-right anchor; dragging
+     * switches to an absolute position that survives a reload, so a panel
+     * parked out of the way stays out of the way.
+     */
+    const POSITION_KEY = 'dsh-villager-hmm:position'
+    const isNum = (value) => typeof value === 'number' && Number.isFinite(value)
+
+    const loadPosition = () => {
+      try {
+        if (typeof localStorage === 'undefined') return null
+        const raw = localStorage.getItem(POSITION_KEY)
+        if (raw === null) return null
+        const parsed = JSON.parse(raw)
+        if (parsed && isNum(parsed.left) && isNum(parsed.top)) {
+          return { left: parsed.left, top: parsed.top }
+        }
+      } catch (error) {
+        // A blocked or corrupt store must not stop the panel rendering.
+      }
+      return null
+    }
+
+    const savePosition = (position) => {
+      try {
+        if (typeof localStorage === 'undefined') return
+        if (position === null) localStorage.removeItem(POSITION_KEY)
+        else localStorage.setItem(POSITION_KEY, JSON.stringify(position))
+      } catch (error) {
+        // A convenience, not state worth failing over.
+      }
+    }
+
+    /** Keep the panel reachable: never fully off the top or left edge. */
+    const clampPosition = (left, top) => {
+      const width = typeof window !== 'undefined' && isNum(window.innerWidth) ? window.innerWidth : 0
+      const height = typeof window !== 'undefined' && isNum(window.innerHeight) ? window.innerHeight : 0
+      const maxLeft = width > 0 ? Math.max(0, width - 80) : left
+      const maxTop = height > 0 ? Math.max(0, height - 44) : top
+      return { left: Math.max(0, Math.min(maxLeft, left)), top: Math.max(0, Math.min(maxTop, top)) }
+    }
+
+    const drag = { active: false, offsetX: 0, offsetY: 0 }
+
+    const onBarDown = (event) => {
+      // A control inside the bar must stay clickable, not start a drag.
+      const target = event.target
+      if (target && typeof target.closest === 'function' && target.closest('button') !== null) return
+      const rect = event.currentTarget.getBoundingClientRect()
+      drag.active = true
+      drag.offsetX = event.clientX - rect.left
+      drag.offsetY = event.clientY - rect.top
+      try { event.currentTarget.setPointerCapture(event.pointerId) } catch (error) { /* optional */ }
+    }
+
+    const onBarMove = (event) => {
+      if (!drag.active) return
+      merge({ pos: clampPosition(event.clientX - drag.offsetX, event.clientY - drag.offsetY) })
+    }
+
+    const onBarUp = (event) => {
+      if (!drag.active) return
+      drag.active = false
+      try { event.currentTarget.releasePointerCapture(event.pointerId) } catch (error) { /* optional */ }
+      savePosition(state.pos)
+    }
+
+    /** Double-clicking the bar returns the panel to its default corner. */
+    const onBarDoubleClick = () => {
+      merge({ pos: null })
+      savePosition(null)
+    }
+
+    state.pos = loadPosition()
+
     // ------------------------------------------------------------------- ui
 
     function Overlay() {
@@ -230,8 +308,22 @@ window.__ModuleLoader__.load({
           }, FIGURE_PARTS.map((part, index) => h('i', { key: index, style: partStyle(part) })))
         : h('div', { className: 'vhm-figure vhm-figure-missing', title: '贴图未获取' }, '?')
 
-      return h('div', { className: 'vhm-ov' + (s.open ? '' : ' vhm-ov-min') },
-        h('div', { className: 'vhm-bar' },
+      // A dragged position pins the panel with left/top, so the stylesheet's
+      // top/right anchor has to be released or both would apply.
+      const placed = s.pos
+        ? { left: s.pos.left + 'px', top: s.pos.top + 'px', right: 'auto', bottom: 'auto' }
+        : null
+
+      return h('div', { className: 'vhm-ov' + (s.open ? '' : ' vhm-ov-min'), style: placed },
+        h('div', {
+          className: 'vhm-bar',
+          title: '拖动可移动 · 双击复位',
+          onPointerDown: onBarDown,
+          onPointerMove: onBarMove,
+          onPointerUp: onBarUp,
+          onPointerCancel: onBarUp,
+          onDoubleClick: onBarDoubleClick,
+        },
           figure,
           h('div', { className: 'vhm-barinfo' },
             h('span', { className: 'vhm-title' }, '村民 hmm 音效'),
@@ -383,12 +475,17 @@ window.__ModuleLoader__.load({
 
 /** Package-owned stylesheet, injected once at materialization. */
 const CSS = [
-  '.vhm-ov{position:fixed;right:16px;bottom:16px;z-index:60;width:400px;max-width:calc(100vw - 32px);',
+  // Anchored top-right, not bottom-right: the composer is full-width, so any
+  // bottom-anchored overlay lands on the send button. A dragged position
+  // overrides this anchor through inline left/top.
+  '.vhm-ov{position:fixed;top:76px;right:16px;z-index:60;width:400px;max-width:calc(100vw - 32px);',
   'pointer-events:auto;border:1px solid var(--dsw-alias-border-l2);border-radius:14px;',
   'background:var(--dsw-alias-bg-overlay);box-shadow:0 10px 30px rgba(0,0,0,.3);',
   'color:var(--dsw-alias-label-primary);font-size:13px;line-height:1.55;overflow:hidden;}',
   '.vhm-ov-min{width:auto;}',
-  '.vhm-bar{display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--dsw-alias-bg-layer-2);}',
+  '.vhm-bar{display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--dsw-alias-bg-layer-2);',
+  'cursor:grab;touch-action:none;user-select:none;}',
+  '.vhm-bar:active{cursor:grabbing;}',
   '.vhm-barinfo{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1;}',
   // The fetched villager.png is the full 64x64 skin. Each `i` inside the figure
   // crops one body part out of it; see FIGURE_PARTS for the UV derivation.

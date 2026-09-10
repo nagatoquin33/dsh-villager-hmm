@@ -4,9 +4,13 @@ A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin.
 Whenever the model goes *"hmm"* — inside its chain of thought, or in the reply
 itself — a Minecraft villager hums back at you.
 
-A small villager sits in the bottom-right corner, bobs its head on every hit,
-and carries the controls: pause, volume, which stream to watch, and the matcher
-itself.
+A small villager sits in the top-right corner, bobs on every hit, and carries
+the controls: pause, volume, which stream to watch, and the matcher itself.
+
+**Drag the title bar to move it; double-click the bar to send it back to the
+corner.** The position is remembered in `localStorage`. It defaults to the
+top-right rather than the bottom-right on purpose — the composer is full-width,
+so a bottom-anchored overlay sits on top of the send button.
 
 ```
 🧑‍🌾 村民 hmm 音效                    触发 12 · 播放 12   －
