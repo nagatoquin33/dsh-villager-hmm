@@ -640,7 +640,13 @@ check('LICENSE is verbatim MIT, so GitHub detects it as MIT', () => {
     text.trimEnd().endsWith('SOFTWARE.'),
     'nothing may be appended after the MIT body',
   )
-  assert.ok(!/NOTICE/i.test(text), 'the asset notice belongs in NOTICE, not LICENSE')
+  // Case-sensitive, and looking for the heading rather than the word: the MIT
+  // body itself contains "The above copyright notice and this permission
+  // notice", so a case-insensitive /NOTICE/ matches the license it guards.
+  assert.ok(
+    !/NOTICE ON THIRD-PARTY ASSETS/.test(text),
+    'the asset notice belongs in NOTICE, not LICENSE',
+  )
   assert.ok(!/^---$/m.test(text), 'no section separator belongs in LICENSE')
 })
 
