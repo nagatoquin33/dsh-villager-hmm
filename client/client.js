@@ -23,6 +23,37 @@ window.__ModuleLoader__.load({
     /** Minimum spacing between two sounds, so a burst does not machine-gun. */
     const MIN_GAP_MS = 260
 
+    /**
+     * Full-body villager, composited from the fetched 64x64 skin.
+     *
+     * Minecraft's box UVs put the FRONT face of a box at (u + d, v + d) sized
+     * w x h. Villagers use a custom model, so these are its offsets rather than
+     * a player skin's:
+     *   head texOffs(0,0)    8x10x8 -> front ( 8,  8)  8x10
+     *   body texOffs(16,20)  8x12x6 -> front (22, 26)  8x12
+     *   arm  texOffs(44,22)  4x8x4  -> front (48, 26)  4x8
+     *   leg  texOffs(0,22)   4x12x4 -> front ( 4, 26)  4x12
+     * `dx`/`dy` place each piece on a 16x34 canvas; scale 4 renders it at
+     * 64x136. Every number stays integral so pixelated scaling stays crisp.
+     */
+    const FIGURE_SCALE = 4
+    const FIGURE_PARTS = [
+      { sx: 8, sy: 8, w: 8, h: 10, dx: 4, dy: 0 },
+      { sx: 22, sy: 26, w: 8, h: 12, dx: 4, dy: 10 },
+      { sx: 48, sy: 26, w: 4, h: 8, dx: 0, dy: 10 },
+      { sx: 48, sy: 26, w: 4, h: 8, dx: 12, dy: 10 },
+      { sx: 4, sy: 26, w: 4, h: 12, dx: 4, dy: 22 },
+      { sx: 4, sy: 26, w: 4, h: 12, dx: 8, dy: 22 },
+    ]
+    /** Inline crop for one figure piece. */
+    const partStyle = (part) => ({
+      left: part.dx * FIGURE_SCALE + 'px',
+      top: part.dy * FIGURE_SCALE + 'px',
+      width: part.w * FIGURE_SCALE + 'px',
+      height: part.h * FIGURE_SCALE + 'px',
+      backgroundPosition: -part.sx * FIGURE_SCALE + 'px ' + -part.sy * FIGURE_SCALE + 'px',
+    })
+
     // ---------------------------------------------------------------- store
 
     const listeners = new Set()
@@ -191,19 +222,21 @@ window.__ModuleLoader__.load({
 
     function Overlay() {
       const s = useStore()
-      const face = s.hasTexture
+      const figure = s.hasTexture
         ? h('div', {
             // A fresh key remounts the node so the CSS animation replays.
-            key: 'face-' + s.hitSeq,
-            className: 'vhm-face' + (s.hitSeq > 0 ? ' vhm-face-hit' : ''),
-          })
-        : h('div', { className: 'vhm-face vhm-face-missing', title: '贴图未获取' }, '?')
+            key: 'figure-' + s.hitSeq,
+            className: 'vhm-figure' + (s.hitSeq > 0 ? ' vhm-figure-hit' : ''),
+          }, FIGURE_PARTS.map((part, index) => h('i', { key: index, style: partStyle(part) })))
+        : h('div', { className: 'vhm-figure vhm-figure-missing', title: '贴图未获取' }, '?')
 
       return h('div', { className: 'vhm-ov' + (s.open ? '' : ' vhm-ov-min') },
         h('div', { className: 'vhm-bar' },
-          face,
-          h('span', { className: 'vhm-title' }, '村民 hmm 音效'),
-          h('span', { className: 'vhm-count' }, '触发 ' + String(s.total) + ' · 播放 ' + String(s.played)),
+          figure,
+          h('div', { className: 'vhm-barinfo' },
+            h('span', { className: 'vhm-title' }, '村民 hmm 音效'),
+            h('span', { className: 'vhm-count' }, '触发 ' + String(s.total) + ' · 播放 ' + String(s.played)),
+          ),
           h('button', {
             className: 'vhm-icon',
             title: s.open ? '收起' : '展开',
@@ -348,23 +381,25 @@ const CSS = [
   'background:var(--dsw-alias-bg-overlay);box-shadow:0 10px 30px rgba(0,0,0,.3);',
   'color:var(--dsw-alias-label-primary);font-size:13px;line-height:1.55;overflow:hidden;}',
   '.vhm-ov-min{width:auto;}',
-  '.vhm-bar{display:flex;align-items:center;gap:9px;padding:7px 10px;background:var(--dsw-alias-bg-layer-2);}',
-  '.vhm-face{width:30px;height:30px;flex:none;border-radius:7px;image-rendering:pixelated;',
-  // The fetched villager.png is the full 64x64 skin; the head front face sits
-  // at (7,8) 10x10, so scale 3 puts it at 192px with a -21/-24px offset.
-  'background-image:url("/dsh-villager-hmm/texture.png");background-repeat:no-repeat;',
-  'background-size:192px 192px;background-position:-21px -24px;',
-  'box-shadow:inset 0 0 0 1px var(--dsw-alias-border-l1);transform-origin:50% 80%;}',
-  '.vhm-face-missing{display:flex;align-items:center;justify-content:center;background:var(--dsw-alias-bg-layer-1);',
-  'color:var(--dsw-alias-label-secondary);font-size:16px;}',
-  '.vhm-face-hit{animation:vhm-bob .46s cubic-bezier(.36,.07,.19,.97);}',
+  '.vhm-bar{display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--dsw-alias-bg-layer-2);}',
+  '.vhm-barinfo{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1;}',
+  // The fetched villager.png is the full 64x64 skin. Each `i` inside the figure
+  // crops one body part out of it; see FIGURE_PARTS for the UV derivation.
+  '.vhm-figure{position:relative;width:64px;height:136px;flex:none;image-rendering:pixelated;',
+  'transform-origin:50% 88%;}',
+  '.vhm-figure i{position:absolute;display:block;background-repeat:no-repeat;',
+  'background-image:url("/dsh-villager-hmm/texture.png");background-size:256px 256px;}',
+  '.vhm-figure-missing{display:flex;align-items:center;justify-content:center;width:44px;height:44px;',
+  'background:var(--dsw-alias-bg-layer-1);border-radius:8px;color:var(--dsw-alias-label-secondary);',
+  'font-size:16px;}',
+  '.vhm-figure-hit{animation:vhm-bob .46s cubic-bezier(.36,.07,.19,.97);}',
   '@keyframes vhm-bob{0%{transform:translateY(0) scale(1) rotate(0)}',
   '16%{transform:translateY(-6px) scale(1.16) rotate(-7deg)}',
   '44%{transform:translateY(1px) scale(.95) rotate(5deg)}',
   '72%{transform:translateY(-2px) scale(1.04) rotate(-2deg)}',
   '100%{transform:translateY(0) scale(1) rotate(0)}}',
   '.vhm-title{font-weight:600;font-size:12px;white-space:nowrap;}',
-  '.vhm-count{margin-left:auto;font-size:11px;color:var(--dsw-alias-label-secondary);',
+  '.vhm-count{font-size:11px;color:var(--dsw-alias-label-secondary);',
   'font-variant-numeric:tabular-nums;white-space:nowrap;}',
   '.vhm-icon{cursor:pointer;font:inherit;line-height:1;font-size:14px;width:22px;height:22px;flex:none;',
   'border-radius:6px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);',
