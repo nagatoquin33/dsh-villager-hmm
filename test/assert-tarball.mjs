@@ -12,10 +12,12 @@
  *
  * Run: node test/assert-tarball.mjs
  */
-import { execFileSync } from 'node:child_process'
+import { execSync } from 'node:child_process'
 
-const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
-const output = execFileSync(npm, ['pack', '--dry-run', '--json'], { encoding: 'utf8' })
+// execSync (shell form) rather than execFileSync: on Windows `npm` is a .cmd
+// shim, and Node refuses to spawn those without a shell (EINVAL), which would
+// make this pass on Linux CI and fail on the maintainer's own machine.
+const output = execSync('npm pack --dry-run --json', { encoding: 'utf8' })
 const [info] = JSON.parse(output)
 
 if (info === undefined || !Array.isArray(info.files)) {

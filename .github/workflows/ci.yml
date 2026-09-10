@@ -12,12 +12,19 @@ permissions:
 
 jobs:
   test:
-    name: test (node ${{ matrix.node }})
-    runs-on: ubuntu-latest
+    name: test (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
+      # Windows is in the matrix on purpose: this plugin is developed on
+      # Windows, and a Windows-only failure (a .cmd spawn, a path separator)
+      # would otherwise pass a Linux-only CI.
       matrix:
+        os: [ubuntu-latest]
         node: ['22', '24']
+        include:
+          - os: windows-latest
+            node: '22'
     steps:
       - uses: actions/checkout@v7
 
@@ -47,6 +54,7 @@ jobs:
       - name: Fail if anything named like a Minecraft asset is committed
         # The repository must never carry Mojang material; this is the guard
         # that keeps a future commit from quietly adding it back.
+        shell: bash
         run: |
           set -euo pipefail
           found="$(git ls-files | grep -Ei '\.(ogg|mp3|wav|png|jpg|jpeg|gif|webp)$' || true)"
@@ -59,6 +67,7 @@ jobs:
       - name: Verify the manifest npm and the catalog read
         # The community catalog's static review checks exactly this: a
         # non-empty dsh.bundle.patch, and that the patch file exists.
+        shell: bash
         run: |
           set -euo pipefail
           patch="$(node -p "require('./package.json').dsh.bundle.patch")"
