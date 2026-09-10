@@ -175,13 +175,27 @@ The plugin owns one HTTP prefix, `/dsh-villager-hmm`:
 ## Tests
 
 ```sh
-npm test
+npm test          # 24 hermetic cases, no dependencies
+npm run test:boot # mounts the host half in a real cordis Context
 ```
 
-24 cases: the scanner against character-by-character streams with `revision`
-incrementing per frame, boundary and false-positive cases, chunk-size
-invariance, config changes, the route surface, a populated and an empty asset
-cache, that no assets are bundled, and the client bundle's materialization.
+`npm test` covers the scanner against character-by-character streams with
+`revision` incrementing per frame, boundary and false-positive cases,
+chunk-size invariance, config changes, the route surface, a populated and an
+empty asset cache, that no assets are bundled, and the client bundle's
+materialization.
+
+`npm run test:boot` is the guard against a harness update breaking the row. It
+imports and applies the real host half inside a live cordis `Context` and
+checks that a missing `webServer`, a throwing `register()`, a malformed request
+URL, and unknown chunk and frame kinds all degrade instead of failing the boot.
+Cordis is an optional peer, so the suite skips cleanly when it is not
+resolvable — point `DSH_CORDIS` at a deployment's copy to run it without
+installing anything:
+
+```sh
+DSH_CORDIS=/path/to/node_modules/@deepseek-ai/cordis/lib/index.js npm run test:boot
+```
 
 ## Releasing
 

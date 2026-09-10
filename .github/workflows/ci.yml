@@ -28,8 +28,18 @@ jobs:
       - name: Show the toolchain
         run: node --version
 
-      - name: Run the self-test
+      - name: Install the dev dependency
+        # Cordis is an optional peer; the boot test needs a real Context to
+        # mount the plugin into. Consumers never install this.
+        run: npm install
+
+      - name: Run the hermetic suite
         run: npm test
+
+      - name: Mount the plugin in a real cordis Context
+        # This is the guard against a DSH/cordis update breaking the row at
+        # boot: it actually imports and applies the host half.
+        run: npm run test:boot
 
       - name: Fail if anything named like a Minecraft asset is committed
         # The repository must never carry Mojang material; this is the guard

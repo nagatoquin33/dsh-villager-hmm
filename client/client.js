@@ -289,18 +289,28 @@ window.__ModuleLoader__.load({
     exports.name = 'dsh-villager-hmm/client'
     exports.inject = ['slots']
     exports.apply = function apply(ctx) {
-      ctx.effect(() => {
-        poll()
-        const id = setInterval(poll, 250)
-        return () => clearInterval(id)
-      }, 'dsh-villager-hmm: poll host state')
+      // Both registrations are best-effort: a renamed slot or a missing timer
+      // must degrade to "no panel", never to a broken page.
+      try {
+        ctx.effect(() => {
+          poll()
+          const id = setInterval(poll, 250)
+          return () => clearInterval(id)
+        }, 'dsh-villager-hmm: poll host state')
+      } catch (error) {
+        console.error('dsh-villager-hmm: polling unavailable', error)
+      }
 
-      ctx.slots.inject('shell.overlay', () => ctx.slots.register({
-        name: 'shell.overlay',
-        id: 'dsh-villager-hmm',
-        order: 50,
-        label: '村民 hmm 音效',
-      }, Overlay))
+      try {
+        ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+          name: 'shell.overlay',
+          id: 'dsh-villager-hmm',
+          order: 50,
+          label: '村民 hmm 音效',
+        }, Overlay))
+      } catch (error) {
+        console.error('dsh-villager-hmm: could not register the overlay', error)
+      }
     }
 
     injectStyles()
@@ -314,14 +324,19 @@ window.__ModuleLoader__.load({
     }
 
     function injectStyles() {
-      if (typeof document === 'undefined') return
-      const tagId = 'dsh-villager-hmm/styles'
-      if (document.querySelector('style[data-plugin-css="' + tagId + '"]') !== null) return
-      const tag = document.createElement('style')
-      tag.dataset.plugin = 'dsh-villager-hmm'
-      tag.dataset.pluginCss = tagId
-      tag.textContent = CSS
-      document.head.appendChild(tag)
+      // Styling is cosmetic; never let it abort materialization.
+      try {
+        if (typeof document === 'undefined') return
+        const tagId = 'dsh-villager-hmm/styles'
+        if (document.querySelector('style[data-plugin-css="' + tagId + '"]') !== null) return
+        const tag = document.createElement('style')
+        tag.dataset.plugin = 'dsh-villager-hmm'
+        tag.dataset.pluginCss = tagId
+        tag.textContent = CSS
+        document.head.appendChild(tag)
+      } catch (error) {
+        console.error('dsh-villager-hmm: stylesheet injection failed', error)
+      }
     }
   },
 })
