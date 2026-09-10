@@ -40,6 +40,15 @@ jobs:
         # mount the plugin into. Consumers never install this.
         run: npm install
 
+      - name: Match the npm the release workflow uses
+        # The release job installs npm@latest. This job has to run the same one,
+        # or a version-specific difference — like npm 12 returning an object
+        # from `pack --json` where npm 11 returns an array — surfaces as a
+        # failed tag push instead of as a CI failure.
+        run: |
+          npm install -g npm@latest
+          npm --version
+
       - name: Run the hermetic suite
         run: npm test
 

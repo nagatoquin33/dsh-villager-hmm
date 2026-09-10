@@ -16,6 +16,7 @@ import { strict as assert } from 'node:assert'
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { assertCodeOnly, parsePackListing, REQUIRED_FILES } from './assert-tarball.mjs'
 
 let passed = 0
 let failed = 0
@@ -594,6 +595,39 @@ await checkAsync('both dictionaries cover the same keys', async () => {
   const zh = Object.keys(locale.dicts.zh || {}).sort()
   assert.ok(en.length >= 20, 'the dictionaries were not registered (' + en.length + ' keys)')
   assert.deepEqual(zh, en, 'a key is missing from one of the dictionaries')
+})
+
+// ------------------------------------------------------- publish assertions
+
+console.log('publish assertions')
+
+/** A pack entry carrying exactly the required files. */
+const packEntry = (extra = []) => ({
+  size: 1234,
+  files: [...REQUIRED_FILES.map((path) => ({ path })), ...extra.map((path) => ({ path }))],
+})
+
+check('parses both npm pack --json shapes', () => {
+  const entry = packEntry()
+  // npm 11 prints an array of one entry; npm 12 prints an object keyed by
+  // package name. Assuming the array form is what broke the first release,
+  // because the local npm was 11 and the release job installs npm@latest.
+  assert.equal(parsePackListing(JSON.stringify([entry])).size, 1234)
+  assert.equal(parsePackListing(JSON.stringify({ 'dsh-villager-hmm': entry })).size, 1234)
+  assert.throws(() => parsePackListing(JSON.stringify({})), /unexpected npm --json shape/)
+  assert.throws(() => parsePackListing('[]'), /unexpected npm --json shape/)
+})
+
+check('rejects a tarball that carries a binary asset', () => {
+  assert.throws(() => assertCodeOnly(packEntry(['assets/idle1.ogg'])), /binary assets/)
+})
+
+check('rejects a tarball missing a harness-critical file', () => {
+  assert.throws(() => assertCodeOnly({ files: [{ path: 'package.json' }] }), /missing required files/)
+})
+
+check('accepts a code-only tarball', () => {
+  assert.equal(assertCodeOnly(packEntry()).length, REQUIRED_FILES.length)
 })
 
 console.log('')

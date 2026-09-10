@@ -22,7 +22,7 @@ test/assert-tarball.mjs     asserts what would be published
 
 ```sh
 npm install        # the cordis dev dependency, for the boot suite
-npm test           # 32 hermetic cases, no dependencies at all
+npm test           # 36 hermetic cases, no dependencies at all
 npm run test:boot  # imports and applies the host half for real
 npm run test:all   # both
 ```
@@ -67,7 +67,11 @@ Beyond the tests, two repository guards:
   checks.
 
 `test/assert-tarball.mjs` additionally inspects what would actually be
-published, and that the harness-critical files are all present.
+published, and that the harness-critical files are all present. Its parsers are
+covered by tests, because `npm pack --json` changed shape between npm 11 (an
+array) and npm 12 (an object) — and assuming the array form is exactly what
+failed the first tag push. CI now installs `npm@latest` so it runs the same npm
+the release job does.
 
 ## Releasing
 
