@@ -174,9 +174,11 @@ and the release process.
 
 ## License
 
-The code is MIT (see `LICENSE`).
+The code is MIT (see `LICENSE` — kept verbatim, with nothing appended, so
+GitHub detects it as MIT rather than "Other").
 
 No third-party assets are bundled or redistributed: `scripts/fetch-assets.mjs`
-downloads them on your machine, at your direction, into a local cache.
-Minecraft is a trademark of Mojang Studios; this project is not affiliated with
-or endorsed by Mojang or Microsoft.
+downloads them on your machine, at your direction, into a local cache. See
+[`NOTICE`](NOTICE) for the asset terms. Minecraft is a trademark of Mojang
+Studios; this project is not affiliated with or endorsed by Mojang or
+Microsoft.

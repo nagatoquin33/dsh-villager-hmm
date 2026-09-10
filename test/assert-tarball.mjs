@@ -37,7 +37,14 @@ export function parsePackListing(text) {
 }
 
 /** Files the harness needs in order to compose and mount the plugin at all. */
-export const REQUIRED_FILES = ['package.json', 'cordis.patch.yml', 'lib/index.js', 'client/client.js']
+export const REQUIRED_FILES = [
+  'package.json',
+  'cordis.patch.yml',
+  'lib/index.js',
+  'client/client.js',
+  'LICENSE',
+  'NOTICE',
+]
 
 /**
  * Assert one pack entry is publishable code.

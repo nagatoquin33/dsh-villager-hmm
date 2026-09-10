@@ -19,16 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-NOTICE ON THIRD-PARTY ASSETS
-
-This package bundles and redistributes no third-party assets.
-
-scripts/fetch-assets.mjs downloads the Minecraft villager sounds and the
-villager skin onto the operator's own machine, at the operator's direction,
-into a local cache outside this package. Those files are the property of
-Mojang Studios / Microsoft and are not covered by the MIT grant above; they
-are never part of this package's source tree, tarball, or repository.
-

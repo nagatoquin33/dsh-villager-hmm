@@ -630,6 +630,26 @@ check('accepts a code-only tarball', () => {
   assert.equal(assertCodeOnly(packEntry()).length, REQUIRED_FILES.length)
 })
 
+check('LICENSE is verbatim MIT, so GitHub detects it as MIT', () => {
+  const text = readFileSync(new URL('../LICENSE', import.meta.url), 'utf8')
+  // GitHub detects a license by matching LICENSE against known templates. Any
+  // appended text — the asset notice used to live here — makes it report
+  // "Other" with spdx_id NOASSERTION instead of MIT.
+  assert.ok(text.startsWith('MIT License\n'), 'LICENSE must start with the MIT title')
+  assert.ok(
+    text.trimEnd().endsWith('SOFTWARE.'),
+    'nothing may be appended after the MIT body',
+  )
+  assert.ok(!/NOTICE/i.test(text), 'the asset notice belongs in NOTICE, not LICENSE')
+  assert.ok(!/^---$/m.test(text), 'no section separator belongs in LICENSE')
+})
+
+check('the asset notice lives in NOTICE', () => {
+  const notice = readFileSync(new URL('../NOTICE', import.meta.url), 'utf8')
+  assert.ok(/NOTICE ON THIRD-PARTY ASSETS/.test(notice))
+  assert.ok(/Mojang/.test(notice), 'the notice must name the asset owner')
+})
+
 console.log('')
 console.log(passed + ' passed, ' + failed + ' failed')
 process.exitCode = failed === 0 ? 0 : 1

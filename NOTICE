@@ -1,0 +1,20 @@
+NOTICE ON THIRD-PARTY ASSETS
+
+The MIT grant in LICENSE covers the source code of this package only.
+
+No third-party assets are bundled or redistributed here. There are no image,
+audio, or other binary files in this repository or in the published tarball.
+
+scripts/fetch-assets.mjs downloads the Minecraft villager sounds and the
+villager skin onto the operator's own machine, at the operator's direction, at
+run time, into a cache outside this package. Those files are the property of
+Mojang Studios / Microsoft, are not covered by the MIT grant, and are never
+part of this repository, its git history, or its npm tarball.
+
+Minecraft is a trademark of Mojang Studios. This project is not affiliated
+with or endorsed by Mojang Studios or Microsoft.
+
+This notice is deliberately a separate file rather than an appendix to
+LICENSE: GitHub detects a license by matching the LICENSE file against known
+templates, and any text appended after the MIT body makes it report the
+license as "Other" instead of "MIT".

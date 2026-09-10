@@ -25,7 +25,8 @@
     "scripts",
     "cordis.patch.yml",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE"
   ],
   "bin": {
     "dsh-villager-hmm-assets": "scripts/fetch-assets.mjs"
