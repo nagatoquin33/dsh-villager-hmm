@@ -22,7 +22,7 @@ test/assert-tarball.mjs     asserts what would be published
 
 ```sh
 npm install        # the cordis dev dependency, for the boot suite
-npm test           # 36 hermetic cases, no dependencies at all
+npm test           # 38 hermetic cases, no dependencies at all
 npm run test:boot  # imports and applies the host half for real
 npm run test:all   # both
 ```
