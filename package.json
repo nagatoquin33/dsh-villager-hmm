@@ -28,7 +28,7 @@
     "LICENSE"
   ],
   "bin": {
-    "dsh-villager-hmm-assets": "./scripts/fetch-assets.mjs"
+    "dsh-villager-hmm-assets": "scripts/fetch-assets.mjs"
   },
   "dsh": {
     "bundle": {
