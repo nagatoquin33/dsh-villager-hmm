@@ -13,7 +13,7 @@
  * Run: node test/self-test.mjs
  */
 import { strict as assert } from 'node:assert'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -129,6 +129,18 @@ check('reports a missing asset set instead of failing', () => {
   assert.equal(state.hasTexture, false)
   assert.equal(typeof state.setupCommand, 'string')
   assert.ok(state.setupCommand.length > 0, 'the panel needs a command to show')
+  // The suggested command must work from any working directory. The bin name
+  // differs from the package name, so a bare `npx dsh-villager-hmm-assets`
+  // only resolves where the package's bin is linked and 404s everywhere else.
+  assert.ok(
+    !state.setupCommand.trimStart().startsWith('npx '),
+    'must not suggest a bare npx bin name: ' + state.setupCommand,
+  )
+  assert.ok(
+    state.setupCommand.includes(mod.FETCH_SCRIPT),
+    'must name the fetcher by absolute path: ' + state.setupCommand,
+  )
+  assert.ok(existsSync(mod.FETCH_SCRIPT), 'the suggested script must exist: ' + mod.FETCH_SCRIPT)
   assert.equal(callOn(bare, '/dsh-villager-hmm/sound/0.ogg').status, 404)
   assert.equal(callOn(bare, '/dsh-villager-hmm/texture.png').status, 404)
 })
