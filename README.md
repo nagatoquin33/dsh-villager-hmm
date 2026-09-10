@@ -13,17 +13,24 @@ top-right rather than the bottom-right on purpose — the composer is full-width
 so a bottom-anchored overlay would sit on top of the send button.
 
 ```
-┌──────────┬─────────────────────────────────┐
-│ villager │ 村民 hmm 音效                － │
-│  figure  │ 触发 12 · 播放 12               │
-├──────────┴─────────────────────────────────┤
-│ 思维链 1284 字   正文 356 字   音效 2 段    │
-│ [ 监听中 · 点击暂停 ] [ 试听一次 ]  音量 ─●─ │
-│ 检测源 [ 仅思维链 ▾ ]                       │
-│ 匹配式 [ (?<!…) ]   [应用] [默认]           │
-│ 最近命中  hmm  嗯  唔                       │
-└────────────────────────────────────────────┘
+┌──────────┬──────────────────────────────────┐
+│ villager │ Villager hmm                  － │
+│  figure  │ hits 12 · played 12              │
+├──────────┴──────────────────────────────────┤
+│ Reasoning 1284 chars  Reply 356 chars        │
+│ Sounds 2 clips                               │
+│ [ Listening · click to pause ] [ Play once ] │
+│ Volume ─●─                                   │
+│ Source  [ Reasoning only ▾ ]                 │
+│ Matcher [ (?<!…) ]   [Apply] [Default]       │
+│ Recent   hmm  嗯  唔                         │
+└──────────────────────────────────────────────┘
 ```
+
+The panel follows the interface language: it registers English and Chinese
+dictionaries with the shared `locale` service and re-renders when the locale
+changes. If that service is unavailable it falls back to English rather than
+failing to render.
 
 ## Install
 
@@ -101,7 +108,7 @@ Everything except `assetDir` is also editable from the floating panel.
 `mode` defaults to `both` on purpose: plenty of models expose no separate
 reasoning channel, and a plugin that silently does nothing looks broken. Switch
 to `reasoning` once you have confirmed your model streams `reasoning-delta` —
-the panel's **思维链** counter tells you: if it climbs, you have a reasoning
+the panel's **Reasoning** counter tells you: if it climbs, you have a reasoning
 channel and can narrow the scope.
 
 ## The matcher

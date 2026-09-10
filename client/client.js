@@ -118,7 +118,7 @@ window.__ModuleLoader__.load({
       try {
         node = new Audio(url)
       } catch (err) {
-        merge({ error: '无法创建音频对象: ' + describe(err) })
+        merge({ error: t('errAudio') + describe(err) })
         return
       }
       node.volume = Math.max(0, Math.min(1, state.volume === undefined ? 0.7 : state.volume))
@@ -126,7 +126,7 @@ window.__ModuleLoader__.load({
       try {
         outcome = node.play()
       } catch (err) {
-        merge({ blocked: true, error: '播放失败: ' + describe(err) })
+        merge({ blocked: true, error: t('errPlay') + describe(err) })
         return
       }
       state.played += 1
@@ -135,7 +135,7 @@ window.__ModuleLoader__.load({
       notify()
       if (outcome && typeof outcome.catch === 'function') {
         outcome.catch((err) => {
-          merge({ blocked: true, error: '浏览器拦截了自动播放: ' + describe(err) })
+          merge({ blocked: true, error: t('errBlocked') + describe(err) })
         })
       }
     }
@@ -196,7 +196,7 @@ window.__ModuleLoader__.load({
         merge(patch)
         if (triggers.length > 0) drain()
       } catch (err) {
-        merge({ error: '无法连接宿主: ' + describe(err) })
+        merge({ error: t('errHost') + describe(err) })
       } finally {
         busy = false
       }
@@ -215,7 +215,7 @@ window.__ModuleLoader__.load({
           patternError: data.patternError ? String(data.patternError) : null,
         })
       } catch (err) {
-        merge({ error: '配置下发失败: ' + describe(err) })
+        merge({ error: t('errConfig') + describe(err) })
       }
     }
 
@@ -296,6 +296,100 @@ window.__ModuleLoader__.load({
 
     state.pos = loadPosition()
 
+    // ------------------------------------------------------------- messages
+
+    /**
+     * Panel text.
+     *
+     * Registered through the shared `locale` service so the panel follows the
+     * interface language instead of hard-coding one. Values are concatenated at
+     * the call site rather than interpolated, which is how the other plugins in
+     * this ecosystem use the service.
+     */
+    const NS = 'dsh-villager-hmm'
+    const MESSAGES = {
+      en: {
+        title: 'Villager hmm',
+        hits: 'hits',
+        played: 'played',
+        reasoning: 'Reasoning',
+        reply: 'Reply',
+        sounds: 'Sounds',
+        chars: 'chars',
+        clips: 'clips',
+        listening: 'Listening · click to pause',
+        paused: 'Paused · click to resume',
+        playOnce: 'Play once',
+        volume: 'Volume',
+        source: 'Source',
+        modeReasoning: 'Reasoning only',
+        modeBoth: 'Reasoning + reply',
+        matcher: 'Matcher',
+        apply: 'Apply',
+        reset: 'Default',
+        recent: 'Recent',
+        waiting: 'waiting for a hmm…',
+        connecting: 'connecting to the host…',
+        assetsMissing: 'Sounds are not fetched yet, so nothing will play.',
+        assetsHow: 'Run this from any directory:',
+        assetsCache: 'Cache',
+        autoplayBlocked: 'The browser blocked autoplay — click anywhere on the page to unlock.',
+        invalidPattern: 'Invalid pattern: ',
+        dragHint: 'Drag to move · double-click to reset',
+        collapse: 'Collapse',
+        expand: 'Expand',
+        noTexture: 'texture not fetched',
+        errAudio: 'Could not create an audio element: ',
+        errPlay: 'Playback failed: ',
+        errBlocked: 'The browser blocked autoplay: ',
+        errHost: 'Cannot reach the host: ',
+        errConfig: 'Could not send the configuration: ',
+      },
+      zh: {
+        title: '村民 hmm 音效',
+        hits: '触发',
+        played: '播放',
+        reasoning: '思维链',
+        reply: '正文',
+        sounds: '音效',
+        chars: '字',
+        clips: '段',
+        listening: '监听中 · 点击暂停',
+        paused: '已暂停 · 点击开启',
+        playOnce: '试听一次',
+        volume: '音量',
+        source: '检测源',
+        modeReasoning: '仅思维链',
+        modeBoth: '思维链 + 正文',
+        matcher: '匹配式',
+        apply: '应用',
+        reset: '默认',
+        recent: '最近命中',
+        waiting: '等待模型说出「嗯…」',
+        connecting: '正在连接宿主…',
+        assetsMissing: '音效素材尚未获取，暂时不会出声。',
+        assetsHow: '在任意目录执行：',
+        assetsCache: '缓存目录',
+        autoplayBlocked: '⚠️ 浏览器拦截了自动播放：在页面上点一下任意位置即可解锁。',
+        invalidPattern: '正则无效：',
+        dragHint: '拖动可移动 · 双击复位',
+        collapse: '收起',
+        expand: '展开',
+        noTexture: '贴图未获取',
+        errAudio: '无法创建音频对象：',
+        errPlay: '播放失败：',
+        errBlocked: '浏览器拦截了自动播放：',
+        errHost: '无法连接宿主：',
+        errConfig: '配置下发失败：',
+      },
+    }
+
+    /**
+     * Bound in apply() once the locale service is reachable. Defaults to
+     * English so the panel renders even when that service is absent.
+     */
+    let t = (key) => (MESSAGES.en[key] === undefined ? key : MESSAGES.en[key])
+
     // ------------------------------------------------------------------- ui
 
     function Overlay() {
@@ -306,7 +400,7 @@ window.__ModuleLoader__.load({
             key: 'figure-' + s.hitSeq,
             className: 'vhm-figure' + (s.hitSeq > 0 ? ' vhm-figure-hit' : ''),
           }, FIGURE_PARTS.map((part, index) => h('i', { key: index, style: partStyle(part) })))
-        : h('div', { className: 'vhm-figure vhm-figure-missing', title: '贴图未获取' }, '?')
+        : h('div', { className: 'vhm-figure vhm-figure-missing', title: t('noTexture') }, '?')
 
       // A dragged position pins the panel with left/top, so the stylesheet's
       // top/right anchor has to be released or both would apply.
@@ -317,7 +411,7 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'vhm-ov' + (s.open ? '' : ' vhm-ov-min'), style: placed },
         h('div', {
           className: 'vhm-bar',
-          title: '拖动可移动 · 双击复位',
+          title: t('dragHint'),
           onPointerDown: onBarDown,
           onPointerMove: onBarMove,
           onPointerUp: onBarUp,
@@ -326,31 +420,32 @@ window.__ModuleLoader__.load({
         },
           figure,
           h('div', { className: 'vhm-barinfo' },
-            h('span', { className: 'vhm-title' }, '村民 hmm 音效'),
-            h('span', { className: 'vhm-count' }, '触发 ' + String(s.total) + ' · 播放 ' + String(s.played)),
+            h('span', { className: 'vhm-title' }, t('title')),
+            h('span', { className: 'vhm-count' },
+              t('hits') + ' ' + String(s.total) + ' · ' + t('played') + ' ' + String(s.played)),
           ),
           h('button', {
             className: 'vhm-icon',
-            title: s.open ? '收起' : '展开',
+            title: s.open ? t('collapse') : t('expand'),
             onClick: () => { state.open = !state.open; notify() },
           }, s.open ? '－' : '＋'),
         ),
         s.open ? h('div', { className: 'vhm-body' },
           s.ready
             ? null
-            : h('div', { className: 'vhm-hint' }, '正在连接宿主…'),
+            : h('div', { className: 'vhm-hint' }, t('connecting')),
           s.soundCount === 0
             ? h('div', { className: 'vhm-setup' },
-                h('div', { className: 'vhm-err' }, '音效素材尚未获取，暂时不会出声。'),
-                h('div', { className: 'vhm-hint' }, '在 profile 目录下执行：'),
+                h('div', { className: 'vhm-err' }, t('assetsMissing')),
+                h('div', { className: 'vhm-hint' }, t('assetsHow')),
                 h('code', { className: 'vhm-cmd' }, s.setupCommand),
-                s.assetDir ? h('div', { className: 'vhm-hint' }, '缓存目录 ' + s.assetDir) : null,
+                s.assetDir ? h('div', { className: 'vhm-hint' }, t('assetsCache') + ' ' + s.assetDir) : null,
               )
             : null,
           h('div', { className: 'vhm-stats' },
-            h('span', null, '思维链 ', h('b', null, String(s.reasoningChars)), ' 字'),
-            h('span', null, '正文 ', h('b', null, String(s.textChars)), ' 字'),
-            h('span', null, '音效 ', h('b', null, String(s.soundCount)), ' 段'),
+            h('span', null, t('reasoning') + ' ', h('b', null, String(s.reasoningChars)), ' ' + t('chars')),
+            h('span', null, t('reply') + ' ', h('b', null, String(s.textChars)), ' ' + t('chars')),
+            h('span', null, t('sounds') + ' ', h('b', null, String(s.soundCount)), ' ' + t('clips')),
           ),
           h('div', { className: 'vhm-row' },
             h('button', {
@@ -363,12 +458,12 @@ window.__ModuleLoader__.load({
                 merge({ enabled: next })
                 pushConfig({ enabled: next })
               },
-            }, s.enabled ? '监听中 · 点击暂停' : '已暂停 · 点击开启'),
+            }, s.enabled ? t('listening') : t('paused')),
             h('button', {
               className: 'vhm-btn',
               onClick: () => { playOne(); drain() },
-            }, '试听一次'),
-            h('label', null, '音量'),
+            }, t('playOnce')),
+            h('label', null, t('volume')),
             h('input', {
               className: 'vhm-range', type: 'range', min: '0', max: '1', step: '0.05',
               value: String(state.volume === undefined ? 0.7 : state.volume),
@@ -376,40 +471,40 @@ window.__ModuleLoader__.load({
             }),
           ),
           h('div', { className: 'vhm-row' },
-            h('label', null, '检测源'),
+            h('label', null, t('source')),
             h('select', {
               className: 'vhm-select', value: s.mode,
               onChange: (event) => { merge({ mode: event.target.value }); pushConfig({ mode: event.target.value }) },
             },
-              h('option', { value: 'reasoning' }, '仅思维链'),
-              h('option', { value: 'both' }, '思维链 + 正文'),
+              h('option', { value: 'reasoning' }, t('modeReasoning')),
+              h('option', { value: 'both' }, t('modeBoth')),
             ),
           ),
           h('div', { className: 'vhm-row' },
-            h('label', null, '匹配式'),
+            h('label', null, t('matcher')),
             h('input', {
               className: 'vhm-input', value: s.patternDraft, spellCheck: false,
               onChange: (event) => { state.patternDraft = event.target.value; notify() },
             }),
-            h('button', { className: 'vhm-btn', onClick: () => pushConfig({ pattern: s.patternDraft }) }, '应用'),
+            h('button', { className: 'vhm-btn', onClick: () => pushConfig({ pattern: s.patternDraft }) }, t('apply')),
             s.defaultPattern
               ? h('button', {
                   className: 'vhm-btn',
                   onClick: () => { merge({ patternDraft: s.defaultPattern }); pushConfig({ pattern: s.defaultPattern }) },
-                }, '默认')
+                }, t('reset'))
               : null,
           ),
-          s.patternError ? h('div', { className: 'vhm-err' }, '正则无效：' + s.patternError) : null,
+          s.patternError ? h('div', { className: 'vhm-err' }, t('invalidPattern') + s.patternError) : null,
           h('div', { className: 'vhm-row' },
-            h('label', null, '最近命中'),
+            h('label', null, t('recent')),
             s.recent.length === 0
-              ? h('span', { className: 'vhm-hint' }, '等待模型说出「嗯…」')
+              ? h('span', { className: 'vhm-hint' }, t('waiting'))
               : h('div', { className: 'vhm-words' },
                   s.recent.map((word, index) => h('span', { className: 'vhm-word', key: index }, word)),
                 ),
           ),
           s.blocked
-            ? h('div', { className: 'vhm-hint' }, '⚠️ 浏览器拦截了自动播放：在页面上点一下任意位置即可解锁。')
+            ? h('div', { className: 'vhm-hint' }, t('autoplayBlocked'))
             : null,
           s.error ? h('div', { className: 'vhm-err' }, s.error) : null,
         ) : null,
@@ -421,6 +516,35 @@ window.__ModuleLoader__.load({
     exports.name = 'dsh-villager-hmm/client'
     exports.inject = ['slots']
     exports.apply = function apply(ctx) {
+      // Follow the interface language. The locale service is read optionally
+      // rather than injected: without it the panel still renders in English,
+      // instead of parking the whole client half for want of a dictionary.
+      try {
+        const locale = ctx.get('locale')
+        if (locale !== undefined && locale !== null) {
+          ctx.effect(() => {
+            const disposers = [
+              locale.register(NS, 'en', MESSAGES.en),
+              locale.register(NS, 'zh', MESSAGES.zh),
+            ]
+            // Registrations bump the revision, so a late dictionary also has to
+            // re-render what is already on screen.
+            const unsubscribe = typeof locale.subscribe === 'function'
+              ? locale.subscribe(() => notify())
+              : null
+            return () => {
+              if (unsubscribe !== null) unsubscribe()
+              for (const dispose of disposers) {
+                try { dispose() } catch (error) { /* already gone */ }
+              }
+            }
+          }, 'dsh-villager-hmm: dictionaries')
+          t = locale.bind(NS)
+        }
+      } catch (error) {
+        console.error('dsh-villager-hmm: locale wiring failed, using English', error)
+      }
+
       // Both registrations are best-effort: a renamed slot or a missing timer
       // must degrade to "no panel", never to a broken page.
       try {
@@ -438,7 +562,7 @@ window.__ModuleLoader__.load({
           name: 'shell.overlay',
           id: 'dsh-villager-hmm',
           order: 50,
-          label: '村民 hmm 音效',
+          label: () => t('title'),
         }, Overlay))
       } catch (error) {
         console.error('dsh-villager-hmm: could not register the overlay', error)

@@ -361,7 +361,38 @@ check('renders without a DOM-visible crash', () => {
  * once: the handler read the live state object twice, so the second read saw
  * the value it had just written.
  */
-const renderPanel = () => {
+/**
+ * A stand-in for the client `locale` service: registers dictionaries, binds a
+ * translator that reads the active one at call time, and exposes what it was
+ * given so a test can check both languages.
+ */
+const makeLocale = (active) => ({
+  dicts: {},
+  register(namespace, tag, dict) {
+    this.dicts[tag] = dict
+    return () => {}
+  },
+  bind() {
+    return (key) => {
+      const dict = this.dicts[active]
+      return dict !== undefined && dict[key] !== undefined ? dict[key] : key
+    }
+  },
+  subscribe() {
+    return () => {}
+  },
+})
+
+/** Every string rendered anywhere in an element tree. */
+const collectText = (node, out = []) => {
+  if (typeof node === 'string') { out.push(node); return out }
+  if (node === null || node === undefined || typeof node !== 'object') return out
+  if (Array.isArray(node)) { for (const child of node) collectText(child, out); return out }
+  collectText(node.children, out)
+  return out
+}
+
+const renderPanel = (locale) => {
   const React = {
     createElement: (type, props, ...children) => ({ type, props: props || {}, children: children.flat() }),
     useState: (initial) => [typeof initial === 'function' ? initial() : initial, () => {}],
@@ -402,6 +433,9 @@ const renderPanel = () => {
   let Panel = null
   exportsObject.apply({
     effect: (fn) => { fn(); return () => {} },
+    // The locale service is optional; `undefined` here exercises the English
+    // fallback that keeps the panel rendering without it.
+    get: (name) => (name === 'locale' ? locale : undefined),
     slots: {
       inject: (key, cb) => { cb(); return () => {} },
       register: (options, component) => { Panel = component; return () => {} },
@@ -422,9 +456,12 @@ const checkAsync = async (label, fn) => {
 }
 
 const findToggle = (Panel, walk) => {
+  // Matched by class, not by label: the label depends on the active locale.
   const toggle = walk(Panel({})).find((node) =>
-    node.type === 'button' && String(node.children[0]).includes('暂停'))
-  assert.ok(toggle, 'the pause button was not found in the rendered tree')
+    node.type === 'button'
+    && typeof node.props.className === 'string'
+    && node.props.className.startsWith('vhm-btn'))
+  assert.ok(toggle, 'the toggle button was not found in the rendered tree')
   return toggle
 }
 
@@ -507,6 +544,56 @@ await checkAsync('the default anchor is not the bottom-right corner', async () =
     !/\.vhm-ov\{[^}]*bottom:/.test(source),
     'the overlay stylesheet must not bottom-anchor the panel over the composer',
   )
+})
+
+await checkAsync('the panel follows the interface language', async () => {
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+  const zhLocale = makeLocale('zh')
+  const zhPanel = renderPanel(zhLocale).Panel
+  await tick()
+  const zhText = collectText(zhPanel({})).join(' ')
+  assert.ok(zhText.includes('村民 hmm 音效'), 'expected the Chinese title, got: ' + zhText)
+  assert.ok(!zhText.includes('Villager hmm'), 'the English title leaked into zh: ' + zhText)
+
+  const enLocale = makeLocale('en')
+  const enPanel = renderPanel(enLocale).Panel
+  await tick()
+  const enText = collectText(enPanel({})).join(' ')
+  assert.ok(enText.includes('Villager hmm'), 'expected the English title, got: ' + enText)
+  // The bug this replaces: an English panel with hard-coded Chinese in it.
+  assert.ok(!/[\u4e00-\u9fff]/.test(enText), 'Chinese leaked into the English panel: ' + enText)
+})
+
+await checkAsync('no Chinese is hard-coded outside the dictionaries', async () => {
+  // A rendered-panel check cannot see strings that only appear on an error
+  // path, which is exactly how the error messages stayed Chinese in an English
+  // panel. This strips the dictionary object and looks at everything else.
+  const start = source.indexOf('const MESSAGES = {')
+  assert.ok(start !== -1, 'the MESSAGES table was not found')
+  let depth = 0
+  let end = -1
+  for (let i = source.indexOf('{', start); i < source.length; i += 1) {
+    if (source[i] === '{') depth += 1
+    else if (source[i] === '}') {
+      depth -= 1
+      if (depth === 0) { end = i; break }
+    }
+  }
+  assert.ok(end !== -1, 'could not find the end of the MESSAGES table')
+  const outside = source.slice(0, start) + source.slice(end + 1)
+  const cjk = outside.match(/[\u4e00-\u9fff]+/g)
+  assert.equal(cjk, null, 'hard-coded Chinese outside the dictionaries: ' + String(cjk))
+})
+
+await checkAsync('both dictionaries cover the same keys', async () => {
+  const locale = makeLocale('en')
+  renderPanel(locale)
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  const en = Object.keys(locale.dicts.en || {}).sort()
+  const zh = Object.keys(locale.dicts.zh || {}).sort()
+  assert.ok(en.length >= 20, 'the dictionaries were not registered (' + en.length + ' keys)')
+  assert.deepEqual(zh, en, 'a key is missing from one of the dictionaries')
 })
 
 console.log('')

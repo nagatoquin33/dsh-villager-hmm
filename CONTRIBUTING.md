@@ -22,7 +22,7 @@ test/assert-tarball.mjs     asserts what would be published
 
 ```sh
 npm install        # the cordis dev dependency, for the boot suite
-npm test           # 29 hermetic cases, no dependencies at all
+npm test           # 32 hermetic cases, no dependencies at all
 npm run test:boot  # imports and applies the host half for real
 npm run test:all   # both
 ```
@@ -32,7 +32,9 @@ npm run test:all   # both
 chunk-size invariance, config changes, the route surface, a populated and an
 empty asset cache, that no assets are bundled, and the client bundle — including
 rendering the panel and replaying real clicks, because a handler bug is
-invisible to a test that only asserts a slot was registered.
+invisible to a test that only asserts a slot was registered. It also renders the
+panel once per locale and asserts that no Chinese reaches an English panel, and
+that both dictionaries cover the same key set.
 
 `test/cordis-boot.mjs` is the guard against a harness update breaking the row.
 It applies the real host half inside a live cordis `Context` and checks that a
