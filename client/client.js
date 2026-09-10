@@ -263,7 +263,14 @@ window.__ModuleLoader__.load({
           h('div', { className: 'vhm-row' },
             h('button', {
               className: 'vhm-btn' + (s.enabled ? ' vhm-btn-on' : ''),
-              onClick: () => { merge({ enabled: !s.enabled }); pushConfig({ enabled: !s.enabled }) },
+              onClick: () => {
+                // Evaluate once: merge() mutates the live state object, so a
+                // second `!s.enabled` here would read the already-flipped value
+                // and send the original one back to the host.
+                const next = s.enabled !== true
+                merge({ enabled: next })
+                pushConfig({ enabled: next })
+              },
             }, s.enabled ? '监听中 · 点击暂停' : '已暂停 · 点击开启'),
             h('button', {
               className: 'vhm-btn',

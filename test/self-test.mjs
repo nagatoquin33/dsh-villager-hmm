@@ -341,6 +341,109 @@ check('renders without a DOM-visible crash', () => {
   assert.equal(typeof exportsObject.apply, 'function')
 })
 
+/**
+ * Render the panel and replay real clicks.
+ *
+ * The checks above only prove that apply() registers a slot. They cannot see a
+ * handler bug, which is how "clicking pause sends the wrong value" shipped
+ * once: the handler read the live state object twice, so the second read saw
+ * the value it had just written.
+ */
+const renderPanel = () => {
+  const React = {
+    createElement: (type, props, ...children) => ({ type, props: props || {}, children: children.flat() }),
+    useState: (initial) => [typeof initial === 'function' ? initial() : initial, () => {}],
+    useEffect: () => {},
+  }
+  const walk = (node, out = []) => {
+    if (node === null || node === undefined) return out
+    if (Array.isArray(node)) { for (const child of node) walk(child, out); return out }
+    if (typeof node !== 'object') return out
+    out.push(node)
+    walk(node.children, out)
+    return out
+  }
+  const urls = []
+  const fetchStub = async (url) => {
+    const href = String(url)
+    urls.push(href)
+    if (href.includes('/state')) {
+      return {
+        ok: true,
+        json: async () => ({
+          version: 2, cursor: 0, triggers: [], total: 0, enabled: true, mode: 'both',
+          pattern: 'x', patternError: null, reasoningChars: 0, textChars: 0, recent: [],
+          soundCount: 2, hasTexture: true, assetDir: '.', setupCommand: 'x', defaultPattern: 'x',
+        }),
+      }
+    }
+    return { ok: true, json: async () => ({ ok: true, pattern: 'x', patternError: null }) }
+  }
+
+  let local = null
+  const run = new Function('window', 'document', 'fetch', 'Audio', 'setInterval', 'clearInterval', source)
+  run(
+    { __ModuleLoader__: { load: (value) => { local = value } } },
+    fakeDocument, fetchStub, function Audio() {}, () => 0, () => {},
+  )
+  const exportsObject = local.factory((spec) => (spec === 'react' ? React : null))
+  let Panel = null
+  exportsObject.apply({
+    effect: (fn) => { fn(); return () => {} },
+    slots: {
+      inject: (key, cb) => { cb(); return () => {} },
+      register: (options, component) => { Panel = component; return () => {} },
+    },
+  })
+  return { Panel, urls, walk }
+}
+
+const checkAsync = async (label, fn) => {
+  try {
+    await fn()
+    passed += 1
+    console.log('  PASS  ' + label)
+  } catch (error) {
+    failed += 1
+    console.log('  FAIL  ' + label + '\n        ' + (error && error.message))
+  }
+}
+
+const findToggle = (Panel, walk) => {
+  const toggle = walk(Panel({})).find((node) =>
+    node.type === 'button' && String(node.children[0]).includes('暂停'))
+  assert.ok(toggle, 'the pause button was not found in the rendered tree')
+  return toggle
+}
+
+await checkAsync('clicking pause sends enabled=0 to the host', async () => {
+  const { Panel, urls, walk } = renderPanel()
+  // Let the immediate poll settle so it cannot interleave with the click.
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  findToggle(Panel, walk).props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  const configUrl = urls.find((url) => url.includes('/config'))
+  assert.ok(configUrl, 'clicking pause sent no config request at all')
+  assert.ok(
+    configUrl.includes('enabled=0'),
+    'clicking pause must disable the host, but it sent: ' + configUrl,
+  )
+})
+
+await checkAsync('clicking again re-enables the host', async () => {
+  const { Panel, urls, walk } = renderPanel()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  const toggle = findToggle(Panel, walk)
+  toggle.props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  toggle.props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  const configs = urls.filter((url) => url.includes('/config'))
+  assert.equal(configs.length, 2, 'expected two config requests, got ' + configs.length)
+  assert.ok(configs[0].includes('enabled=0'), 'first click should disable: ' + configs[0])
+  assert.ok(configs[1].includes('enabled=1'), 'second click should re-enable: ' + configs[1])
+})
+
 console.log('')
 console.log(passed + ' passed, ' + failed + ' failed')
 process.exitCode = failed === 0 ? 0 : 1
