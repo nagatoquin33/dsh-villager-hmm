@@ -41,6 +41,9 @@ jobs:
         # boot: it actually imports and applies the host half.
         run: npm run test:boot
 
+      - name: Assert the published artifact is code-only
+        run: node test/assert-tarball.mjs
+
       - name: Fail if anything named like a Minecraft asset is committed
         # The repository must never carry Mojang material; this is the guard
         # that keeps a future commit from quietly adding it back.
