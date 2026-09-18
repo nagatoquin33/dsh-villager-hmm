@@ -61,8 +61,8 @@ and never fails silently.
 
 ## Assets
 
-**This package ships no Minecraft material.** The villager's sounds and both
-villager textures are fetched on your machine into a per-user cache:
+**This package ships no Minecraft material.** The villager's sounds and textures
+are fetched on your machine into a per-user cache:
 
 ```
 $DSH_HOME/.dsh-villager-hmm/assets/
@@ -75,6 +75,8 @@ $DSH_HOME/.dsh-villager-hmm/assets/
   villager.png        the 64x64 base skin, cropped into the figure by CSS
   villager-type.png   the villager type overlay — this is what puts the
                       brown robe on, see "The figure" below
+  damage.png          the 8x8 damage-indicator heart thrown by the pet
+                      interaction, see "Petting" below
 ```
 
 The damage clips are named `hit*`, not `hurt*`: the game's own `sounds.json`
@@ -212,12 +214,12 @@ nearest-neighbour upscale crisp.
 Collapsing the panel leaves the villager's head floating on its own, and that
 head is a pet:
 
-- **Click it** — the head flinches, flashes red and grunts. The red is the
-  game's damage overlay: an `feColorMatrix` that keeps the red channel and
-  crushes green and blue. (A `hue-rotate`/`sepia` chain was tried first and
-  cannot do this job — hue-rotate is a linear approximation, so as soon as the
-  saturation is high enough to read as "hurt" the result lands on orange or
-  magenta instead of red.)
+- **Click it** — the head flinches, flashes red, grunts, and throws the game's
+  damage particles: `minecraft:damage_indicator`, the dark-red hearts from
+  `textures/particle/damage.png`. That sprite is an 8x8 luminance mask with a
+  grey interior, so the burst is brightened and tinted through the same red
+  matrix as the flash rather than pasted in raw (an untinted heart is grey, and
+  one tinted exactly like the villager disappears into it).
 - **The `▣` button under it** restores the full panel. Petting and restoring are
   separate controls on purpose: folding both onto the head's click is what made
   the head unpetable in the first place.
@@ -225,7 +227,9 @@ head is a pet:
 The expanded panel's body reacts to a click the same way, so the villager can be
 petted in either form. Neither path touches the host: a pet plays a damage clip
 straight away rather than waiting behind the rate-limited queue that the ambient
-hmm sounds go through.
+hmm sounds go through. The burst is derived from the pet counter through a hash
+rather than `Math.random()`, because the panel re-renders on every 250 ms poll
+and a fresh random set each time would make the hearts teleport mid-flight.
 
 The tint lives inside the `@keyframes`, never on the class that starts them.
 An element keeps its class after an animation ends, so a `filter` declared on
@@ -245,6 +249,7 @@ The plugin owns one HTTP prefix, `/dsh-villager-hmm`:
 | `GET /hurt/<n>.ogg` | damage audio for the pet interaction, from the cache |
 | `GET /texture.png` | the base villager skin, read from the cache |
 | `GET /type.png` | the villager type overlay — the robe, read from the cache |
+| `GET /particle.png` | the 8x8 damage-indicator heart, read from the cache |
 
 ## Development
 

@@ -111,6 +111,65 @@ function partStyle(part, scale, layers) {
   }
 }
 
+/** The rendered box of each form, in CSS pixels. */
+const FIGURE_BOX = { w: FIGURE_EXTENT.w * FIGURE_SCALE, h: FIGURE_EXTENT.h * FIGURE_SCALE }
+const FACE_BOX = { w: FACE_EXTENT.w * FACE_SCALE, h: FACE_EXTENT.h * FACE_SCALE }
+
+/**
+ * The damage-indicator burst a pet throws.
+ *
+ * The game spawns `minecraft:damage_indicator` when something takes damage: a
+ * handful of the 8x8 hearts from `textures/particle/damage.png` drifting up and
+ * out, growing and fading. They are absolutely positioned sprites here, placed
+ * inside the figure so the same red matrix that flashes the villager tints them
+ * — the sprite's interior is a grey luminance mask, so an untinted heart would
+ * render grey.
+ *
+ * The offsets come from `seq` through a hash rather than `Math.random()`: the
+ * panel re-renders every 250 ms, and a fresh random set each time would make the
+ * burst teleport mid-flight.
+ */
+const PARTICLE_COUNT = 7
+const noise = (n) => {
+  const x = Math.sin(n * 12.9898 + 78.233) * 43758.5453
+  return x - Math.floor(x)
+}
+const particleBurst = (seq, box) => {
+  const burst = []
+  const reach = Math.max(box.w, box.h)
+  for (let i = 0; i < PARTICLE_COUNT; i += 1) {
+    const a = noise(seq * 131 + i * 17)
+    const b = noise(seq * 197 + i * 29 + 5)
+    const c = noise(seq * 313 + i * 41 + 9)
+    // Fly outward on a spread of angles rather than only upward: the widget is
+    // small, so anything that stays inside the silhouette lands on a villager
+    // that is already red and disappears into it.
+    const angle = a * Math.PI * 2
+    const radius = (0.3 + b * 0.45) * reach
+    burst.push({
+      key: i,
+      left: Math.round(box.w * (0.35 + a * 0.3)) + 'px',
+      top: Math.round(box.h * (0.3 + b * 0.4)) + 'px',
+      size: Math.max(7, Math.min(16, Math.round(box.w * (0.22 + c * 0.12)))) + 'px',
+      dx: Math.round(Math.cos(angle) * radius) + 'px',
+      dy: Math.round(Math.sin(angle) * radius * 0.8 - box.h * 0.15) + 'px',
+      delay: Math.round(a * 110) + 'ms',
+    })
+  }
+  return burst
+}
+
+const particleStyle = (particle) => ({
+  left: particle.left,
+  top: particle.top,
+  width: particle.size,
+  height: particle.size,
+  animationDelay: particle.delay,
+  // Read by @keyframes vhm-particle for the flight path.
+  '--vhm-pdx': particle.dx,
+  '--vhm-pdy': particle.dy,
+})
+
 window.__ModuleLoader__.load({
   id: 'dsh-villager-hmm',
   factory: (require) => {
@@ -159,6 +218,7 @@ window.__ModuleLoader__.load({
       soundCount: 0,
       hasTexture: false,
       hasType: false,
+      hasParticle: false,
       hurtCount: 0,
       petSeq: 0,
       lastAnim: '',
@@ -327,6 +387,7 @@ window.__ModuleLoader__.load({
           hurtCount: data.hurtCount,
           hasTexture: data.hasTexture === true,
           hasType: data.hasType === true,
+          hasParticle: data.hasParticle === true,
           assetDir: typeof data.assetDir === 'string' ? data.assetDir : '',
           setupCommand: typeof data.setupCommand === 'string' ? data.setupCommand : state.setupCommand,
           patternError: data.patternError ? String(data.patternError) : null,
@@ -545,6 +606,20 @@ window.__ModuleLoader__.load({
 
     // ------------------------------------------------------------------- ui
 
+    /**
+     * The damage-indicator burst, or null when it is not the pet's moment.
+     *
+     * The layer is placed *inside* the element the pet tint is applied to, so
+     * the particles inherit both the red matrix and the flinch transform instead
+     * of needing a second filter of their own.
+     */
+    function particlesFor(s, box) {
+      if (s.lastAnim !== 'pet' || s.hasParticle !== true) return null
+      return h('div', { className: 'vhm-particles', key: 'burst' },
+        particleBurst(s.petSeq, box).map((particle) =>
+          h('i', { key: particle.key, style: particleStyle(particle) })))
+    }
+
     function Overlay() {
       const s = useStore()
       const layers = textureLayers(s.hasType)
@@ -552,14 +627,22 @@ window.__ModuleLoader__.load({
         ? h('div', {
             // A fresh key remounts the node so the CSS animation replays.
             key: 'figure-' + s.hitSeq + ':' + s.petSeq,
-            className: 'vhm-figure'
-              + (s.lastAnim === 'hit' ? ' vhm-figure-hit' : '')
-              + (s.lastAnim === 'pet' ? ' vhm-pet' : ''),
+            className: 'vhm-figure' + (s.lastAnim === 'hit' ? ' vhm-figure-hit' : ''),
             // The robe comes from the overlay; without it the villager is drawn
             // in the base skin's under-robe, which is worth saying out loud.
             title: s.hasType ? t('petHint') : t('noType'),
             onClick: () => { if (!drag.moved) pet() },
-          }, FIGURE_PARTS.map((part, index) => h('i', { key: index, style: partStyle(part, FIGURE_SCALE, layers) })))
+          }, [
+            // The pet tint goes on this inner box, not on `.vhm-figure`, so the
+            // burst below is a sibling rather than a descendant — inside it the
+            // hearts would be painted the same dark red as the villager.
+            h('div', {
+              key: 'body-' + s.lastAnim,
+              className: 'vhm-figure-body' + (s.lastAnim === 'pet' ? ' vhm-pet' : ''),
+            }, FIGURE_PARTS.map((part, index) =>
+              h('i', { key: index, style: partStyle(part, FIGURE_SCALE, layers) }))),
+            particlesFor(s, FIGURE_BOX),
+          ])
         : h('div', { className: 'vhm-figure vhm-figure-missing', title: t('noTexture') }, '?')
 
       // A dragged position pins the panel with left/top, so the stylesheet's
@@ -583,15 +666,18 @@ window.__ModuleLoader__.load({
               onPointerCancel: onBarUp,
               onDoubleClick: onBarDoubleClick,
               onClick: () => { if (!drag.moved) pet() },
-            }, s.hasTexture
-              ? h('div', {
-                  key: 'head-' + s.hitSeq + ':' + s.petSeq,
-                  className: 'vhm-min-face vhm-face'
-                    + (s.lastAnim === 'hit' ? ' vhm-min-hit' : '')
-                    + (s.lastAnim === 'pet' ? ' vhm-pet' : ''),
-                }, FACE_PARTS.map((part, index) => h('i', { key: index, style: partStyle(part, FACE_SCALE, layers) })))
-              : h('div', { className: 'vhm-min-face vhm-figure-missing' }, '?'),
-            ),
+            }, [
+              s.hasTexture
+                ? h('div', {
+                    key: 'head-' + s.hitSeq + ':' + s.petSeq,
+                    className: 'vhm-min-face vhm-face'
+                      + (s.lastAnim === 'hit' ? ' vhm-min-hit' : '')
+                      + (s.lastAnim === 'pet' ? ' vhm-pet' : ''),
+                  }, FACE_PARTS.map((part, index) =>
+                    h('i', { key: index, style: partStyle(part, FACE_SCALE, layers) })))
+                : h('div', { key: 'head-missing', className: 'vhm-min-face vhm-figure-missing' }, '?'),
+              particlesFor(s, FACE_BOX),
+            ]),
             h('button', {
               className: 'vhm-min-open',
               title: t('openPanel'),
@@ -851,6 +937,9 @@ const CSS = [
   'width:' + (FIGURE_EXTENT.w * FIGURE_SCALE) + 'px;height:' + (FIGURE_EXTENT.h * FIGURE_SCALE) + 'px;',
   'transform-origin:50% 88%;}',
   '.vhm-figure i{position:absolute;display:block;background-repeat:no-repeat;}',
+  // The pet tint animates this box rather than `.vhm-figure`, so the burst can
+  // be a sibling of it and keep its own colour.
+  '.vhm-figure-body{position:absolute;inset:0;}',
   '.vhm-figure-missing{display:flex;align-items:center;justify-content:center;width:44px;height:44px;',
   'background:var(--dsw-alias-bg-layer-1);border-radius:8px;color:var(--dsw-alias-label-secondary);',
   'font-size:16px;}',
@@ -885,6 +974,22 @@ const CSS = [
   '62%{filter:url(#' + HURT_FILTER_ID + ');transform:translateY(0) scale(1.03)}',
   '66%{filter:none;transform:translateY(0) scale(1.01)}',
   '100%{filter:none;transform:translateY(0) scale(1)}}',
+  // Damage-indicator particles. They are siblings of the pet-tinted element,
+  // not children: inside it they would inherit the villager's own dark red and
+  // vanish against it. `brightness()` lifts the sprite's grey mask before the
+  // shared matrix tints it, so the hearts read as a brighter red than the
+  // villager they pop out of. `--vhm-pdx` / `--vhm-pdy` carry each particle's
+  // flight path, which is what lets one keyframe serve all of them.
+  '.vhm-particles{position:absolute;inset:0;pointer-events:none;}',
+  '.vhm-particles i{position:absolute;display:block;opacity:0;',
+  'background-image:url("/dsh-villager-hmm/particle.png");background-size:100% 100%;',
+  'background-repeat:no-repeat;image-rendering:pixelated;',
+  'filter:brightness(1.9) url(#' + HURT_FILTER_ID + ');',
+  'animation:vhm-particle .7s ease-out forwards;}',
+  '@keyframes vhm-particle{0%{opacity:0;transform:translate(0,0) scale(.5)}',
+  '12%{opacity:1}',
+  '55%{opacity:1}',
+  '100%{opacity:0;transform:translate(var(--vhm-pdx,0px),var(--vhm-pdy,-18px)) scale(1.15)}}',
   '.vhm-title{font-weight:600;font-size:12px;white-space:nowrap;}',
   '.vhm-count{font-size:11px;color:var(--dsw-alias-label-secondary);',
   'font-variant-numeric:tabular-nums;white-space:nowrap;}',

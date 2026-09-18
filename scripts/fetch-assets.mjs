@@ -24,7 +24,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { assetDirFor, CACHE_DIR, HURT_FILES, SOUND_FILES, TEXTURE_FILE, TYPE_FILE } from '../lib/index.js'
+import { assetDirFor, CACHE_DIR, HURT_FILES, PARTICLE_FILE, SOUND_FILES, TEXTURE_FILE, TYPE_FILE } from '../lib/index.js'
 
 /** Default source: a public mirror of the vanilla 1.21.4 client assets. */
 const DEFAULT_BASE =
@@ -48,6 +48,7 @@ const FILES = [
   ...[...SOUND_FILES, ...HURT_FILES].map((to) => ({ from: SOUND_ROOT + to, to, kind: 'ogg' })),
   { from: 'textures/entity/villager/villager.png', to: TEXTURE_FILE, kind: 'png' },
   { from: 'textures/entity/villager/type/plains.png', to: TYPE_FILE, kind: 'png' },
+  { from: 'textures/particle/damage.png', to: PARTICLE_FILE, kind: 'png' },
 ]
 
 const MAGIC = { ogg: Buffer.from('OggS', 'latin1'), png: Buffer.from('89504e470d0a1a0a', 'hex') }

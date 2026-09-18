@@ -56,6 +56,7 @@ writeFileSync(join(cacheDir, 'hit3.ogg'), makeOgg())
 writeFileSync(join(cacheDir, 'hit4.ogg'), makeOgg())
 writeFileSync(join(cacheDir, 'villager.png'), makePng(64, 64))
 writeFileSync(join(cacheDir, 'villager-type.png'), makePng(64, 64))
+writeFileSync(join(cacheDir, 'damage.png'), makePng(8, 8))
 // An empty cache: the state a fresh install is in before the fetch script runs.
 const emptyDir = mkdtempSync(join(tmpdir(), 'vhm-empty-'))
 
@@ -134,6 +135,7 @@ check('reports a missing asset set instead of failing', () => {
   assert.equal(state.soundCount, 0)
   assert.equal(state.hasTexture, false)
   assert.equal(state.hasType, false)
+  assert.equal(state.hasParticle, false)
   assert.equal(state.hurtCount, 0)
   assert.equal(typeof state.setupCommand, 'string')
   assert.ok(state.setupCommand.length > 0, 'the panel needs a command to show')
@@ -153,6 +155,7 @@ check('reports a missing asset set instead of failing', () => {
   assert.equal(callOn(bare, '/dsh-villager-hmm/hurt/0.ogg').status, 404)
   assert.equal(callOn(bare, '/dsh-villager-hmm/texture.png').status, 404)
   assert.equal(callOn(bare, '/dsh-villager-hmm/type.png').status, 404)
+  assert.equal(callOn(bare, '/dsh-villager-hmm/particle.png').status, 404)
 })
 
 // The scanning suite runs in reasoning-only mode so each case is isolated.
@@ -268,6 +271,12 @@ check('serves the fetched assets with the right magic', () => {
   const type = call('/dsh-villager-hmm/type.png')
   assert.equal(type.status, 200)
   assert.equal(type.body.subarray(0, 8).toString('hex'), '89504e470d0a1a0a', 'not a PNG')
+  // The damage-indicator sprite is a single 8x8 frame, not a sheet.
+  const particle = call('/dsh-villager-hmm/particle.png')
+  assert.equal(particle.status, 200)
+  assert.equal(particle.body.subarray(0, 8).toString('hex'), '89504e470d0a1a0a', 'not a PNG')
+  assert.equal(particle.body.readUInt32BE(16), 8, 'the damage sprite is 8 wide')
+  assert.equal(particle.body.readUInt32BE(20), 8, 'the damage sprite is 8 tall')
   // Damage clips. They are `hit*` in the vanilla assets even though the game
   // event is `entity.villager.hurt`, so the route name and the file name differ.
   for (let index = 0; index < 4; index += 1) {
@@ -283,6 +292,7 @@ check('reports the fetched asset set', () => {
   assert.equal(state.hurtCount, 4)
   assert.equal(state.hasTexture, true)
   assert.equal(state.hasType, true)
+  assert.equal(state.hasParticle, true)
 })
 
 check('rejects unknown routes and out-of-range clips', () => {
@@ -355,7 +365,8 @@ check('materializes into a cordis client plugin', () => {
  */
 const geometry = () => new Function(
   'window', 'document', 'fetch', 'Audio', 'setInterval', 'clearInterval',
-  source + '\n;return { FIGURE_PARTS, FIGURE_EXTENT, FACE_PARTS, FACE_EXTENT, partStyle }',
+  source + '\n;return { FIGURE_PARTS, FIGURE_EXTENT, FACE_PARTS, FACE_EXTENT, partStyle,'
+    + ' FIGURE_BOX, FACE_BOX, PARTICLE_COUNT, particleBurst, particleStyle }',
 )(fakeWindow, fakeDocument, () => Promise.resolve({ ok: false }), function Audio() {}, () => 0, () => {})
 
 check('draws exactly the cubes of the villager model', () => {
@@ -431,6 +442,24 @@ check('scales and layers one piece consistently', () => {
   assert.equal(layered.backgroundSize, '256px 256px,256px 256px')
 })
 
+check('throws a deterministic damage-indicator burst', () => {
+  const g = geometry()
+  const once = g.particleBurst(1, g.FACE_BOX)
+  assert.equal(once.length, g.PARTICLE_COUNT, 'one sprite per particle')
+  // The panel re-renders every 250 ms; a random burst would teleport mid-flight.
+  assert.deepEqual(g.particleBurst(1, g.FACE_BOX), once, 'the same pet must replay the same burst')
+  assert.notDeepEqual(g.particleBurst(2, g.FACE_BOX), once, 'a new pet needs its own paths')
+  for (const particle of once) {
+    assert.match(particle.size, /^\d+px$/, 'every particle needs a size: ' + particle.size)
+    assert.match(particle.dx, /^-?\d+px$/, 'every particle needs a path: ' + particle.dx)
+    assert.match(particle.dy, /^-?\d+px$/, 'every particle needs a path: ' + particle.dy)
+    assert.match(particle.delay, /^\d+ms$/, 'every particle needs a delay: ' + particle.delay)
+    // The vanilla sprite is 8x8; anything smaller than 7px is unreadable at the
+    // size the collapsed head renders at.
+    assert.ok(parseInt(particle.size, 10) >= 7, 'particles must stay legible')
+  }
+})
+
 /**
  * Materializes the bundle against a document that records what it injects, so
  * the checks below read the stylesheet the browser actually receives instead of
@@ -496,6 +525,25 @@ check('keeps the pet tint inside the animation', () => {
   assert.ok(frames, '@keyframes vhm-hurt is missing')
   assert.ok(frames[1].includes('filter:url(#'), 'the keyframes never apply the tint')
   assert.ok(/filter:none/.test(frames[1]), 'the keyframes never clear the tint')
+})
+
+check('keeps the burst out of the pet-tinted element', () => {
+  const css = capturedStyles().style.textContent
+  // A `filter` on an ancestor repaints the hearts the villager's own dark red,
+  // which is exactly what made them invisible against the flashing body.
+  assert.ok(
+    /\.vhm-particles i\{[^}]*filter:brightness\(/.test(css),
+    'the burst must carry its own brightening filter',
+  )
+  // Which is why the tint moved onto an inner box the burst can sit beside.
+  assert.ok(
+    /\.vhm-figure-body\{position:absolute;inset:0;\}/.test(css),
+    'the expanded figure needs the inner box the pet tint animates',
+  )
+  const frames = /@keyframes vhm-particle\{([\s\S]*?)\}\}/.exec(css)
+  assert.ok(frames, '@keyframes vhm-particle is missing')
+  assert.ok(frames[1].includes('var(--vhm-pdx'), 'the flight path must come from the particle')
+  assert.ok(/opacity:0/.test(frames[1]), 'the burst must fade out')
 })
 
 check('apply() polls the host and registers the overlay slot', () => {
@@ -592,7 +640,7 @@ const renderPanel = (locale) => {
         json: async () => ({
           version: 2, cursor: 0, triggers: [], total: 0, enabled: true, mode: 'both',
           pattern: 'x', patternError: null, reasoningChars: 0, textChars: 0, recent: [],
-          soundCount: 2, hurtCount: 4, hasTexture: true, hasType: true,
+          soundCount: 2, hurtCount: 4, hasTexture: true, hasType: true, hasParticle: true,
           assetDir: '.', setupCommand: 'x', defaultPattern: 'x',
         }),
       }
@@ -771,6 +819,28 @@ await checkAsync('petting the collapsed head plays a damage clip and does not ex
   assert.equal(
     Panel({}).props.className, 'vhm-ov vhm-ov-min',
     'petting the head must not expand the panel',
+  )
+})
+
+await checkAsync('a pet throws the hearts and an idle panel carries none', async () => {
+  const { Panel, walk } = renderPanel()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  const layersIn = (nodes) => nodes.filter((node) =>
+    typeof node.props.className === 'string' && node.props.className === 'vhm-particles')
+  assert.equal(layersIn(walk(Panel({}))).length, 0, 'an idle panel must not carry a burst')
+  findFigure(Panel, walk).props.onClick()
+  // One tree, one render: Panel({}) rebuilds every node, so identity only holds
+  // within a single walk.
+  const tree = walk(Panel({}))
+  const layers = layersIn(tree)
+  assert.equal(layers.length, 1, 'a pet must add exactly one burst layer')
+  assert.equal(layers[0].children.length, 7, 'the burst is seven hearts')
+  const host = tree.find((node) =>
+    Array.isArray(node.children) && node.children.includes(layers[0]))
+  assert.ok(host, 'the burst must be attached to the figure')
+  assert.ok(
+    !String(host.props.className).includes('vhm-pet'),
+    'the burst must not sit inside the pet-tinted element',
   )
 })
 
