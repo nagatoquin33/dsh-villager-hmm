@@ -61,17 +61,25 @@ and never fails silently.
 
 ## Assets
 
-**This package ships no Minecraft material.** The two villager sounds and both
+**This package ships no Minecraft material.** The villager's sounds and both
 villager textures are fetched on your machine into a per-user cache:
 
 ```
 $DSH_HOME/.dsh-villager-hmm/assets/
   idle1.ogg           villager "hmm"
   idle2.ogg           villager "hmm", second take
+  hit1.ogg            damage grunt, played when you pet the villager
+  hit2.ogg            damage grunt
+  hit3.ogg            damage grunt
+  hit4.ogg            damage grunt
   villager.png        the 64x64 base skin, cropped into the figure by CSS
   villager-type.png   the villager type overlay — this is what puts the
                       brown robe on, see "The figure" below
 ```
+
+The damage clips are named `hit*`, not `hurt*`: the game's own `sounds.json`
+maps the `entity.villager.hurt` event onto `mob/villager/hit1..hit4`, and no
+`hurt*.ogg` exists in the vanilla assets.
 
 The panel shows the exact command if the cache is empty. Two sources are
 supported:
@@ -199,6 +207,31 @@ the canvas extents computed from the part list, so editing a part cannot leave
 the stylesheet behind. Coordinates stay integral, which is what keeps the 4x
 nearest-neighbour upscale crisp.
 
+## Petting and zoom
+
+The villager is interactive on its own, independently of the hmm scanner:
+
+- **Pet it** — click the body and it flinches, flashes red and grunts. The red
+  is the game's damage overlay: an `feColorMatrix` that keeps the red channel
+  and crushes green and blue. (A `hue-rotate`/`sepia` chain was tried first and
+  cannot do this job — hue-rotate is a linear approximation, so as soon as the
+  saturation is high enough to read as "hurt" the result lands on orange or
+  magenta instead of red.)
+- **Enlarge it** — the `1×` / `2×` button in the panel header scales the sprite
+  on its own. The factor is an integer multiple of `FIGURE_SCALE`, so the
+  enlarged sprite still lands on exact pixel boundaries and stays crisp. The
+  button reads out the factor currently in effect.
+
+Both work whether or not the scanner is paused, and neither touches the host:
+a pet plays a damage clip straight away rather than waiting behind the
+rate-limited queue that the ambient hmm sounds go through.
+
+The tint lives inside the `@keyframes`, never on the class that starts them.
+An element keeps its class after an animation ends, so a `filter` declared on
+`.vhm-pet` would leave the villager permanently red; and because `filter: url()`
+cannot interpolate, the keyframes hold the tint at full strength and then swap
+to `none` across two stops 4% apart, which is what makes it read as a flash.
+
 ## Routes
 
 The plugin owns one HTTP prefix, `/dsh-villager-hmm`:
@@ -207,7 +240,8 @@ The plugin owns one HTTP prefix, `/dsh-villager-hmm`:
 | --- | --- |
 | `GET /state?cursor=N` | counters, asset status, and triggers newer than `N` |
 | `GET /config?enabled&mode&pattern` | change settings at runtime |
-| `GET /sound/<n>.ogg` | the audio, read from the cache |
+| `GET /sound/<n>.ogg` | ambient "hmm" audio, read from the cache |
+| `GET /hurt/<n>.ogg` | damage audio for the pet interaction, from the cache |
 | `GET /texture.png` | the base villager skin, read from the cache |
 | `GET /type.png` | the villager type overlay — the robe, read from the cache |
 

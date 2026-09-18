@@ -38,6 +38,12 @@
  * and the robe covers the legs down to the hem, leaving bare shins below.
  */
 const FIGURE_SCALE = 4
+/**
+ * The enlarge button's factor. An integer multiple of FIGURE_SCALE so the
+ * zoomed sprite still lands on exact pixel boundaries, which is what keeps the
+ * nearest-neighbour upscale crisp instead of blurry.
+ */
+const ZOOM_FACTOR = 2
 const FIGURE_PARTS = [
   { sx: 4,  sy: 26, w: 4, h: 12, dx: 4,  dy: 22 }, // leg  [-4, 0,-2]
   { sx: 4,  sy: 26, w: 4, h: 12, dx: 8,  dy: 22 }, // leg  [ 0, 0,-2]
@@ -71,6 +77,26 @@ const FACE_EXTENT = canvasExtent(FACE_PARTS)
 
 /** The fetched skins are 64x64 box-UV atlases. */
 const TEXTURE_PX = 64
+
+/**
+ * The hurt tint, applied while the pet animation runs.
+ *
+ * A `hue-rotate`/`sepia` chain was tried first and cannot do this job:
+ * hue-rotate is a linear approximation, so once saturation is pushed high
+ * enough to read as "hurt" the result lands on orange or magenta instead of
+ * red. An feColorMatrix keeps the red channel and crushes green and blue,
+ * which is what the game's damage overlay looks like.
+ *
+ * `color-interpolation-filters="sRGB"` is required, not cosmetic: the default
+ * linearRGB washes the tint out.
+ */
+const HURT_FILTER_ID = 'vhm-hurt-tint'
+const HURT_TINT_MATRIX = [
+  '1 0 0 0 0.14',
+  '0 0.22 0 0 0',
+  '0 0 0.22 0 0',
+  '0 0 0 1 0',
+].join(' ')
 
 /**
  * Inline crop for one piece, scaled by `scale`. Every background layer shares
@@ -139,6 +165,10 @@ window.__ModuleLoader__.load({
       soundCount: 0,
       hasTexture: false,
       hasType: false,
+      hurtCount: 0,
+      zoomed: false,
+      petSeq: 0,
+      lastAnim: '',
       assetDir: '',
       setupCommand: 'npx dsh-villager-hmm-assets',
       blocked: false,
@@ -171,6 +201,7 @@ window.__ModuleLoader__.load({
     // ---------------------------------------------------------------- audio
 
     let soundUrls = []
+    let hurtUrls = []
     let cursor = 0
     let busy = false
     let lastPlay = 0
@@ -197,6 +228,7 @@ window.__ModuleLoader__.load({
       }
       state.played += 1
       state.hitSeq += 1
+      state.lastAnim = 'hit'
       state.blocked = false
       notify()
       if (outcome && typeof outcome.catch === 'function') {
@@ -204,6 +236,54 @@ window.__ModuleLoader__.load({
           merge({ blocked: true, error: t('errBlocked') + describe(err) })
         })
       }
+    }
+
+    /**
+     * The damage grunt a pet produces.
+     *
+     * It deliberately skips `queue`/`drain`: a pet is the direct answer to a
+     * click, so making it wait behind a backlog of hmm hits would read as a
+     * dropped input. The shared volume and autoplay handling still apply.
+     */
+    const playHurt = () => {
+      if (hurtUrls.length === 0) return
+      const url = hurtUrls[Math.floor(Math.random() * hurtUrls.length)]
+      let node = null
+      try {
+        node = new Audio(url)
+      } catch (err) {
+        merge({ error: t('errAudio') + describe(err) })
+        return
+      }
+      node.volume = Math.max(0, Math.min(1, state.volume === undefined ? 0.7 : state.volume))
+      let outcome = null
+      try {
+        outcome = node.play()
+      } catch (err) {
+        merge({ blocked: true, error: t('errPlay') + describe(err) })
+        return
+      }
+      state.blocked = false
+      if (outcome && typeof outcome.catch === 'function') {
+        outcome.catch((err) => {
+          merge({ blocked: true, error: t('errBlocked') + describe(err) })
+        })
+      }
+    }
+
+    /**
+     * Pet the villager: it flinches, flashes red and grunts.
+     *
+     * The red tint lives inside the keyframes rather than in the class that
+     * starts them, so it cannot outlive the animation and leave the villager
+     * permanently dyed. `lastAnim` is what stops a later hmm hit from replaying
+     * the pet animation (the remount key changes for both).
+     */
+    const pet = () => {
+      state.petSeq += 1
+      state.lastAnim = 'pet'
+      playHurt()
+      notify()
     }
 
     const drain = () => {
@@ -237,6 +317,10 @@ window.__ModuleLoader__.load({
           soundUrls = []
           for (let i = 0; i < data.soundCount; i += 1) soundUrls.push(PREFIX + '/sound/' + i + '.ogg')
         }
+        if (data.hurtCount > 0 && hurtUrls.length !== data.hurtCount) {
+          hurtUrls = []
+          for (let i = 0; i < data.hurtCount; i += 1) hurtUrls.push(PREFIX + '/hurt/' + i + '.ogg')
+        }
         cursor = typeof data.cursor === 'number' ? data.cursor : cursor
         const patch = {
           ready: true,
@@ -247,6 +331,7 @@ window.__ModuleLoader__.load({
           textChars: data.textChars,
           recent: Array.isArray(data.recent) ? data.recent.slice(-8) : [],
           soundCount: data.soundCount,
+          hurtCount: data.hurtCount,
           hasTexture: data.hasTexture === true,
           hasType: data.hasType === true,
           assetDir: typeof data.assetDir === 'string' ? data.assetDir : '',
@@ -410,6 +495,9 @@ window.__ModuleLoader__.load({
         expandHint: 'Expand · double-click to reset',
         noTexture: 'texture not fetched',
         noType: 'Type overlay not fetched — the villager has no robe yet',
+        petHint: 'Click the villager to pet it',
+        zoomIn: 'Enlarge the villager',
+        zoomOut: 'Shrink the villager',
         errAudio: 'Could not create an audio element: ',
         errPlay: 'Playback failed: ',
         errBlocked: 'The browser blocked autoplay: ',
@@ -449,6 +537,9 @@ window.__ModuleLoader__.load({
         expandHint: '展开 · 双击复位',
         noTexture: '贴图未获取',
         noType: '未获取类型覆盖层，村民还没有袍子',
+        petHint: '点一下摸摸村民',
+        zoomIn: '放大村民',
+        zoomOut: '缩小村民',
         errAudio: '无法创建音频对象：',
         errPlay: '播放失败：',
         errBlocked: '浏览器拦截了自动播放：',
@@ -468,15 +559,25 @@ window.__ModuleLoader__.load({
     function Overlay() {
       const s = useStore()
       const layers = textureLayers(s.hasType)
+      // The container is sized from the same integers the pieces are cropped
+      // with, so enlarging it cannot desync the crops from the box.
+      const scale = FIGURE_SCALE * (s.zoomed ? ZOOM_FACTOR : 1)
       const figure = s.hasTexture
         ? h('div', {
             // A fresh key remounts the node so the CSS animation replays.
-            key: 'figure-' + s.hitSeq,
-            className: 'vhm-figure' + (s.hitSeq > 0 ? ' vhm-figure-hit' : ''),
+            key: 'figure-' + s.hitSeq + ':' + s.petSeq,
+            className: 'vhm-figure'
+              + (s.lastAnim === 'hit' ? ' vhm-figure-hit' : '')
+              + (s.lastAnim === 'pet' ? ' vhm-pet' : ''),
+            style: {
+              width: (FIGURE_EXTENT.w * scale) + 'px',
+              height: (FIGURE_EXTENT.h * scale) + 'px',
+            },
             // The robe comes from the overlay; without it the villager is drawn
             // in the base skin's under-robe, which is worth saying out loud.
-            title: s.hasType ? t('dragHint') : t('noType'),
-          }, FIGURE_PARTS.map((part, index) => h('i', { key: index, style: partStyle(part, FIGURE_SCALE, layers) })))
+            title: s.hasType ? t('petHint') : t('noType'),
+            onClick: () => { if (!drag.moved) pet() },
+          }, FIGURE_PARTS.map((part, index) => h('i', { key: index, style: partStyle(part, scale, layers) })))
         : h('div', { className: 'vhm-figure vhm-figure-missing', title: t('noTexture') }, '?')
 
       // A dragged position pins the panel with left/top, so the stylesheet's
@@ -527,6 +628,14 @@ window.__ModuleLoader__.load({
             h('span', { className: 'vhm-count' },
               t('hits') + ' ' + String(s.total) + ' · ' + t('played') + ' ' + String(s.played)),
           ),
+          // Enlarge the villager on its own. The label shows the factor
+          // currently in effect, so the button doubles as the readout.
+          h('button', {
+            className: 'vhm-icon vhm-zoom',
+            title: s.zoomed ? t('zoomOut') : t('zoomIn'),
+            'aria-pressed': s.zoomed,
+            onClick: () => { state.zoomed = !state.zoomed; notify() },
+          }, s.zoomed ? ZOOM_FACTOR + '×' : '1×'),
           h('button', {
             className: 'vhm-icon',
             title: s.open ? t('collapse') : t('expand'),
@@ -687,15 +796,44 @@ window.__ModuleLoader__.load({
       try {
         if (typeof document === 'undefined') return
         const tagId = 'dsh-villager-hmm/styles'
-        if (document.querySelector('style[data-plugin-css="' + tagId + '"]') !== null) return
-        const tag = document.createElement('style')
-        tag.dataset.plugin = 'dsh-villager-hmm'
-        tag.dataset.pluginCss = tagId
-        tag.textContent = CSS
-        document.head.appendChild(tag)
+        if (document.querySelector('style[data-plugin-css="' + tagId + '"]') === null) {
+          const tag = document.createElement('style')
+          tag.dataset.plugin = 'dsh-villager-hmm'
+          tag.dataset.pluginCss = tagId
+          tag.textContent = CSS
+          document.head.appendChild(tag)
+        }
+        injectHurtFilter()
       } catch (error) {
         console.error('dsh-villager-hmm: stylesheet injection failed', error)
       }
+    }
+
+    /**
+     * `filter: url(#id)` resolves against the document, so the filter element
+     * has to be in it. Zero-sized and inert, and guarded by id so repeated
+     * materializations cannot stack copies.
+     */
+    function injectHurtFilter() {
+      if (typeof document.createElementNS !== 'function') return
+      if (typeof document.getElementById !== 'function') return
+      if (document.getElementById(HURT_FILTER_ID) !== null) return
+      const ns = 'http://www.w3.org/2000/svg'
+      const svg = document.createElementNS(ns, 'svg')
+      svg.setAttribute('width', '0')
+      svg.setAttribute('height', '0')
+      svg.setAttribute('aria-hidden', 'true')
+      const filter = document.createElementNS(ns, 'filter')
+      filter.setAttribute('id', HURT_FILTER_ID)
+      // Without this the default linearRGB colour space washes the tint out.
+      filter.setAttribute('color-interpolation-filters', 'sRGB')
+      const matrix = document.createElementNS(ns, 'feColorMatrix')
+      matrix.setAttribute('type', 'matrix')
+      matrix.setAttribute('values', HURT_TINT_MATRIX)
+      filter.appendChild(matrix)
+      svg.appendChild(filter)
+      const host = document.body === undefined || document.body === null ? document.head : document.body
+      host.appendChild(svg)
     }
   },
 })
@@ -750,6 +888,22 @@ const CSS = [
   '25%{transform:translateY(-5px) scale(1.18)}',
   '60%{transform:translateY(1px) scale(.94)}',
   '100%{transform:translateY(0) scale(1)}}',
+  // Pet reaction: flinch, flash red, settle. The red is a `filter` inside the
+  // keyframes rather than a declaration on `.vhm-pet`, because an element keeps
+  // its class after the animation ends — a tint declared there would stick and
+  // leave the villager permanently dyed.
+  //
+  // `filter: url()` cannot interpolate, so the tint holds at full strength and
+  // then swaps to `none` across the two stops that sit 4% apart; only the
+  // transform tweens. That cut reads as a flash, which is what a hurt overlay
+  // is, and it keeps the tint off the element the moment the animation ends.
+  '.vhm-pet{animation:vhm-hurt .5s cubic-bezier(.36,.07,.19,.97);}',
+  '@keyframes vhm-hurt{',
+  '0%{filter:url(#' + HURT_FILTER_ID + ');transform:translateY(-3px) scale(1.08)}',
+  '28%{filter:url(#' + HURT_FILTER_ID + ');transform:translateY(0) scale(.95)}',
+  '62%{filter:url(#' + HURT_FILTER_ID + ');transform:translateY(0) scale(1.03)}',
+  '66%{filter:none;transform:translateY(0) scale(1.01)}',
+  '100%{filter:none;transform:translateY(0) scale(1)}}',
   '.vhm-title{font-weight:600;font-size:12px;white-space:nowrap;}',
   '.vhm-count{font-size:11px;color:var(--dsw-alias-label-secondary);',
   'font-variant-numeric:tabular-nums;white-space:nowrap;}',
@@ -757,6 +911,12 @@ const CSS = [
   'border-radius:6px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);',
   'color:var(--dsw-alias-label-primary);}',
   '.vhm-icon:hover{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary);}',
+  // The zoom label is two glyphs wide, so it needs more room than the square
+  // icon buttons, and it reads as pressed while the villager is enlarged.
+  '.vhm-zoom{width:auto;min-width:30px;padding:0 5px;font-size:11px;',
+  'font-variant-numeric:tabular-nums;}',
+  '.vhm-zoom[aria-pressed="true"]{border-color:var(--dsw-alias-brand-primary);',
+  'color:var(--dsw-alias-brand-primary);}',
   '.vhm-body{display:flex;flex-direction:column;gap:9px;padding:11px 13px;}',
   '.vhm-stats{display:flex;gap:14px;flex-wrap:wrap;color:var(--dsw-alias-label-secondary);font-size:12px;}',
   '.vhm-stats b{color:var(--dsw-alias-label-primary);font-variant-numeric:tabular-nums;}',

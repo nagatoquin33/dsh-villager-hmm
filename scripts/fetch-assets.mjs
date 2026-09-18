@@ -24,22 +24,28 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { assetDirFor, CACHE_DIR, SOUND_FILES, TEXTURE_FILE, TYPE_FILE } from '../lib/index.js'
+import { assetDirFor, CACHE_DIR, HURT_FILES, SOUND_FILES, TEXTURE_FILE, TYPE_FILE } from '../lib/index.js'
 
 /** Default source: a public mirror of the vanilla 1.21.4 client assets. */
 const DEFAULT_BASE =
   'https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/1.21.4/assets/minecraft/'
 
+/** The villager's audio lives here, and the cache keeps the vanilla file name. */
+const SOUND_ROOT = 'sounds/mob/villager/'
+
 /**
- * Remote path -> cache file name. Keys are relative to the source root.
+ * Remote path -> cache file name, relative to the source root.
+ *
+ * The audio entries are derived from the exported lists rather than written out
+ * by hand, so adding a clip cannot leave the index the routes use out of step
+ * with what was downloaded.
  *
  * The type overlay is not optional decoration: the robe is the model's second
  * body cube, and the base skin leaves its pixels transparent, so this file is
  * what actually puts clothes on the villager.
  */
 const FILES = [
-  { from: 'sounds/mob/villager/idle1.ogg', to: SOUND_FILES[0], kind: 'ogg' },
-  { from: 'sounds/mob/villager/idle2.ogg', to: SOUND_FILES[1], kind: 'ogg' },
+  ...[...SOUND_FILES, ...HURT_FILES].map((to) => ({ from: SOUND_ROOT + to, to, kind: 'ogg' })),
   { from: 'textures/entity/villager/villager.png', to: TEXTURE_FILE, kind: 'png' },
   { from: 'textures/entity/villager/type/plains.png', to: TYPE_FILE, kind: 'png' },
 ]

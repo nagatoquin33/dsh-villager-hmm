@@ -50,6 +50,10 @@ const makeOgg = () => Buffer.concat([Buffer.from('OggS', 'latin1'), Buffer.alloc
 const cacheDir = mkdtempSync(join(tmpdir(), 'vhm-assets-'))
 writeFileSync(join(cacheDir, 'idle1.ogg'), makeOgg())
 writeFileSync(join(cacheDir, 'idle2.ogg'), makeOgg())
+writeFileSync(join(cacheDir, 'hit1.ogg'), makeOgg())
+writeFileSync(join(cacheDir, 'hit2.ogg'), makeOgg())
+writeFileSync(join(cacheDir, 'hit3.ogg'), makeOgg())
+writeFileSync(join(cacheDir, 'hit4.ogg'), makeOgg())
 writeFileSync(join(cacheDir, 'villager.png'), makePng(64, 64))
 writeFileSync(join(cacheDir, 'villager-type.png'), makePng(64, 64))
 // An empty cache: the state a fresh install is in before the fetch script runs.
@@ -129,6 +133,8 @@ check('reports a missing asset set instead of failing', () => {
   const state = JSON.parse(String(callOn(bare, '/dsh-villager-hmm/state?cursor=0').body))
   assert.equal(state.soundCount, 0)
   assert.equal(state.hasTexture, false)
+  assert.equal(state.hasType, false)
+  assert.equal(state.hurtCount, 0)
   assert.equal(typeof state.setupCommand, 'string')
   assert.ok(state.setupCommand.length > 0, 'the panel needs a command to show')
   // The suggested command must work from any working directory. The bin name
@@ -144,6 +150,7 @@ check('reports a missing asset set instead of failing', () => {
   )
   assert.ok(existsSync(mod.FETCH_SCRIPT), 'the suggested script must exist: ' + mod.FETCH_SCRIPT)
   assert.equal(callOn(bare, '/dsh-villager-hmm/sound/0.ogg').status, 404)
+  assert.equal(callOn(bare, '/dsh-villager-hmm/hurt/0.ogg').status, 404)
   assert.equal(callOn(bare, '/dsh-villager-hmm/texture.png').status, 404)
   assert.equal(callOn(bare, '/dsh-villager-hmm/type.png').status, 404)
 })
@@ -261,18 +268,27 @@ check('serves the fetched assets with the right magic', () => {
   const type = call('/dsh-villager-hmm/type.png')
   assert.equal(type.status, 200)
   assert.equal(type.body.subarray(0, 8).toString('hex'), '89504e470d0a1a0a', 'not a PNG')
+  // Damage clips. They are `hit*` in the vanilla assets even though the game
+  // event is `entity.villager.hurt`, so the route name and the file name differ.
+  for (let index = 0; index < 4; index += 1) {
+    const hurt = call('/dsh-villager-hmm/hurt/' + index + '.ogg')
+    assert.equal(hurt.status, 200, 'hurt ' + index + ' missing')
+    assert.equal(hurt.body.subarray(0, 4).toString('latin1'), 'OggS')
+  }
 })
 
 check('reports the fetched asset set', () => {
   const state = getJson('/dsh-villager-hmm/state?cursor=999999')
   assert.equal(state.soundCount, 2)
+  assert.equal(state.hurtCount, 4)
   assert.equal(state.hasTexture, true)
   assert.equal(state.hasType, true)
 })
 
-check('rejects unknown routes and out-of-range sounds', () => {
+check('rejects unknown routes and out-of-range clips', () => {
   assert.equal(call('/dsh-villager-hmm/nope').status, 404)
   assert.equal(call('/dsh-villager-hmm/sound/9.ogg').status, 404)
+  assert.equal(call('/dsh-villager-hmm/hurt/9.ogg').status, 404)
 })
 
 check('applies a config change and reports a bad pattern without throwing', () => {
@@ -415,6 +431,73 @@ check('scales and layers one piece consistently', () => {
   assert.equal(layered.backgroundSize, '256px 256px,256px 256px')
 })
 
+/**
+ * Materializes the bundle against a document that records what it injects, so
+ * the checks below read the stylesheet the browser actually receives instead of
+ * pattern-matching the source's string literals.
+ */
+const capturedStyles = () => {
+  const seen = { style: null, filter: null, matrix: null }
+  const el = (tag) => ({
+    tag, dataset: {}, textContent: '', style: {}, attrs: {},
+    setAttribute(name, value) { this.attrs[name] = value },
+    appendChild() {},
+  })
+  const doc = {
+    querySelector: () => null,
+    getElementById: () => null,
+    createElement: (tag) => { const node = el(tag); if (tag === 'style') seen.style = node; return node },
+    createElementNS: (ns, tag) => {
+      const node = el(tag)
+      if (tag === 'filter') seen.filter = node
+      if (tag === 'feColorMatrix') seen.matrix = node
+      return node
+    },
+    head: { appendChild: () => {} },
+    body: { appendChild: () => {} },
+  }
+  let local = null
+  new Function('window', 'document', 'fetch', 'Audio', 'setInterval', 'clearInterval', source)(
+    { __ModuleLoader__: { load: (value) => { local = value } } },
+    doc, () => Promise.resolve({ ok: false }), function Audio() {}, () => 0, () => {},
+  )
+  local.factory((spec) => (spec === 'react' ? FakeReact : null))
+  return seen
+}
+
+check('injects the hurt filter the stylesheet references', () => {
+  const seen = capturedStyles()
+  assert.ok(seen.style, 'no stylesheet was injected')
+  assert.ok(seen.filter, 'no SVG filter element was injected')
+  assert.ok(seen.matrix, 'the filter carries no colour matrix')
+  const id = seen.filter.attrs.id
+  assert.ok(id, 'filter:url() cannot resolve without an id')
+  assert.ok(
+    seen.style.textContent.includes('url(#' + id + ')'),
+    'the stylesheet does not reference the injected filter',
+  )
+  // The default filter colour space is linearRGB, which washes the tint out.
+  assert.equal(seen.filter.attrs['color-interpolation-filters'], 'sRGB')
+  // feColorMatrix needs exactly 4 rows of 5 values.
+  assert.equal(seen.matrix.attrs.type, 'matrix')
+  assert.equal(seen.matrix.attrs.values.trim().split(/\s+/).length, 20)
+})
+
+check('keeps the pet tint inside the animation', () => {
+  const css = capturedStyles().style.textContent
+  const petRule = /\.vhm-pet\{([^}]*)\}/.exec(css)
+  assert.ok(petRule, '.vhm-pet is missing')
+  // The class stays on the element once the animation ends, so a tint declared
+  // on it would leave the villager permanently red. Only the keyframes may
+  // apply it — a `hue-rotate` chain was also tried here and lands on orange or
+  // magenta rather than red.
+  assert.ok(!petRule[1].includes('filter'), 'the tint must not be declared on .vhm-pet')
+  const frames = /@keyframes vhm-hurt\{([\s\S]*?)\}\}/.exec(css)
+  assert.ok(frames, '@keyframes vhm-hurt is missing')
+  assert.ok(frames[1].includes('filter:url(#'), 'the keyframes never apply the tint')
+  assert.ok(/filter:none/.test(frames[1]), 'the keyframes never clear the tint')
+})
+
 check('apply() polls the host and registers the overlay slot', () => {
   const registrations = []
   const clientCtx = {
@@ -499,6 +582,7 @@ const renderPanel = (locale) => {
     return out
   }
   const urls = []
+  const audio = []
   const fetchStub = async (url) => {
     const href = String(url)
     urls.push(href)
@@ -508,7 +592,8 @@ const renderPanel = (locale) => {
         json: async () => ({
           version: 2, cursor: 0, triggers: [], total: 0, enabled: true, mode: 'both',
           pattern: 'x', patternError: null, reasoningChars: 0, textChars: 0, recent: [],
-          soundCount: 2, hasTexture: true, hasType: true, assetDir: '.', setupCommand: 'x', defaultPattern: 'x',
+          soundCount: 2, hurtCount: 4, hasTexture: true, hasType: true,
+          assetDir: '.', setupCommand: 'x', defaultPattern: 'x',
         }),
       }
     }
@@ -517,9 +602,16 @@ const renderPanel = (locale) => {
 
   let local = null
   const run = new Function('window', 'document', 'fetch', 'Audio', 'setInterval', 'clearInterval', source)
+  // The Audio stub records what was played so a test can tell an ambient hit
+  // from a pet's damage grunt.
+  function AudioSpy(url) {
+    audio.push(String(url))
+    this.volume = 1
+    this.play = () => Promise.resolve()
+  }
   run(
     { __ModuleLoader__: { load: (value) => { local = value } } },
-    fakeDocument, fetchStub, function Audio() {}, () => 0, () => {},
+    fakeDocument, fetchStub, AudioSpy, () => 0, () => {},
   )
   const exportsObject = local.factory((spec) => (spec === 'react' ? React : null))
   let Panel = null
@@ -533,7 +625,7 @@ const renderPanel = (locale) => {
       register: (options, component) => { Panel = component; return () => {} },
     },
   })
-  return { Panel, urls, walk }
+  return { Panel, urls, walk, audio }
 }
 
 const checkAsync = async (label, fn) => {
@@ -624,6 +716,54 @@ await checkAsync('double-clicking the bar restores the default corner', async ()
   assert.ok(Panel({}).props.style, 'expected a pinned position first')
   bar.props.onDoubleClick()
   assert.equal(Panel({}).props.style, null, 'double-click must clear the pinned position')
+})
+
+/** The pettable body: `.vhm-figure` carrying the click handler. */
+const findFigure = (Panel, walk) => walk(Panel({})).find((node) =>
+  typeof node.props.className === 'string'
+  && node.props.className.startsWith('vhm-figure')
+  && typeof node.props.onClick === 'function')
+
+await checkAsync('petting the villager plays a damage clip', async () => {
+  const { Panel, walk, audio } = renderPanel()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  const figure = findFigure(Panel, walk)
+  assert.ok(figure, 'the figure does not accept a click')
+  figure.props.onClick()
+  assert.equal(audio.length, 1, 'a pet must play exactly one clip, played ' + audio.length)
+  assert.ok(
+    /\/hurt\/\d+\.ogg$/.test(audio[0]),
+    'a pet must play a damage clip, not an ambient one: ' + audio[0],
+  )
+})
+
+await checkAsync('a pet does not wait behind hmm hits', async () => {
+  const { Panel, walk, audio } = renderPanel()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  const figure = findFigure(Panel, walk)
+  figure.props.onClick()
+  figure.props.onClick()
+  figure.props.onClick()
+  // Ambient clips go through a rate-limited queue; a pet answers a click, so
+  // three pets have to be three clips.
+  assert.equal(audio.length, 3, 'expected three clips, got ' + audio.length)
+})
+
+await checkAsync('the zoom button enlarges the villager on its own', async () => {
+  const { Panel, walk } = renderPanel()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  const zoom = walk(Panel({})).find((node) =>
+    node.type === 'button'
+    && typeof node.props.className === 'string'
+    && node.props.className.includes('vhm-zoom'))
+  assert.ok(zoom, 'the zoom button was not rendered')
+  assert.equal(findFigure(Panel, walk).props.style.width, '64px', 'the default figure is 16 * 4')
+  assert.equal(findFigure(Panel, walk).props.style.height, '136px', 'the default figure is 34 * 4')
+  zoom.props.onClick()
+  assert.equal(findFigure(Panel, walk).props.style.width, '128px', 'zooming must double the figure')
+  assert.equal(findFigure(Panel, walk).props.style.height, '272px')
+  zoom.props.onClick()
+  assert.equal(findFigure(Panel, walk).props.style.width, '64px', 'clicking again must restore the size')
 })
 
 await checkAsync('the default anchor is not the bottom-right corner', async () => {
