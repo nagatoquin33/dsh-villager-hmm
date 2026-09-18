@@ -6,10 +6,11 @@ No third-party assets are bundled or redistributed here. There are no image,
 audio, or other binary files in this repository or in the published tarball.
 
 scripts/fetch-assets.mjs downloads the Minecraft villager sounds and the
-villager skin onto the operator's own machine, at the operator's direction, at
-run time, into a cache outside this package. Those files are the property of
-Mojang Studios / Microsoft, are not covered by the MIT grant, and are never
-part of this repository, its git history, or its npm tarball.
+villager textures (the base skin and the type overlay that carries the robe)
+onto the operator's own machine, at the operator's direction, at run time, into
+a cache outside this package. Those files are the property of Mojang Studios /
+Microsoft, are not covered by the MIT grant, and are never part of this
+repository, its git history, or its npm tarball.
 
 Minecraft is a trademark of Mojang Studios. This project is not affiliated
 with or endorsed by Mojang Studios or Microsoft.

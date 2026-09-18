@@ -61,14 +61,16 @@ and never fails silently.
 
 ## Assets
 
-**This package ships no Minecraft material.** The two villager sounds and the
-villager skin are fetched on your machine into a per-user cache:
+**This package ships no Minecraft material.** The two villager sounds and both
+villager textures are fetched on your machine into a per-user cache:
 
 ```
 $DSH_HOME/.dsh-villager-hmm/assets/
-  idle1.ogg      villager "hmm"
-  idle2.ogg      villager "hmm", second take
-  villager.png   the 64x64 villager skin, cropped into the figure by CSS
+  idle1.ogg           villager "hmm"
+  idle2.ogg           villager "hmm", second take
+  villager.png        the 64x64 base skin, cropped into the figure by CSS
+  villager-type.png   the villager type overlay — this is what puts the
+                      brown robe on, see "The figure" below
 ```
 
 The panel shows the exact command if the cache is empty. Two sources are
@@ -161,6 +163,42 @@ delta is amortised O(n). A match that ends exactly at the buffer end is deferred
 unless the attempt is finishing, so `hm` is never counted before the next delta
 can turn it into `hmm`.
 
+## The figure
+
+The villager is composited in CSS out of the fetched 64x64 atlases. Every crop
+comes from Mojang's own model — `Mojang/bedrock-samples`,
+`resource_pack/models/entity/villager.geo.json`, whose Bedrock cube list matches
+the Java villager. The front face of a `w x h x d` cube with box-UV origin
+`(u, v)` is `(u + d, v + d)` sized `w x h`, and the model spans y 0..34 with the
+feet at 0, so the canvas is 16x34 and the head sits on top:
+
+| Cube | Origin | Size | UV | Front face | Canvas |
+| --- | --- | --- | --- | --- | --- |
+| head | `[-4,24,-4]` | 8,10,8 | `[0,0]` | `(8,8)` 8x10 | 4,0 |
+| nose | `[-1,23,-6]` | 2,4,2 | `[24,0]` | `(26,2)` 2x4 | 7,7 |
+| body | `[-4,12,-3]` | 8,12,6 | `[16,20]` | `(22,26)` 8x12 | 4,10 |
+| robe | `[-4,6,-3]` | 8,18,6 | `[0,38]` | `(6,44)` 8x18 | 4,10 |
+| arm | `[-8,16,-2]` / `[4,16,-2]` | 4,8,4 | `[44,22]` | `(48,26)` 4x8 | 0,10 / 12,10 |
+| forearms | `[-4,16,-2]` | 8,4,4 | `[40,38]` | `(44,42)` 8x4 | 4,14 |
+| leg | `[-4,0,-2]` / `[0,0,-2]` | 4,12,4 | `[0,22]` | `(4,26)` 4x12 | 4,22 / 8,22 |
+
+Two of those cubes are easy to miss, and the figure looks wrong without them:
+
+- **The robe** is the *second* body cube. The base skin leaves its pixels fully
+  transparent, because the game paints the robe from the villager **type**
+  overlay texture at the same UVs. That is why `villager-type.png` is not
+  decoration: without it the villager wears only the base under-robe.
+- **The forearms** are the folded arms across the chest, drawn last so they sit
+  over the robe.
+
+The nose hangs one pixel below the chin (`y 23..27` against a head ending at
+24), which is why the collapsed head's canvas is 11 tall rather than 10.
+
+Every size in the stylesheet is derived from `FIGURE_SCALE` / `FACE_SCALE` and
+the canvas extents computed from the part list, so editing a part cannot leave
+the stylesheet behind. Coordinates stay integral, which is what keeps the 4x
+nearest-neighbour upscale crisp.
+
 ## Routes
 
 The plugin owns one HTTP prefix, `/dsh-villager-hmm`:
@@ -170,7 +208,8 @@ The plugin owns one HTTP prefix, `/dsh-villager-hmm`:
 | `GET /state?cursor=N` | counters, asset status, and triggers newer than `N` |
 | `GET /config?enabled&mode&pattern` | change settings at runtime |
 | `GET /sound/<n>.ogg` | the audio, read from the cache |
-| `GET /texture.png` | the villager skin, read from the cache |
+| `GET /texture.png` | the base villager skin, read from the cache |
+| `GET /type.png` | the villager type overlay — the robe, read from the cache |
 
 ## Development
 

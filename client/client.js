@@ -7,6 +7,90 @@
  * is either a `require` resolved by the module table or a plain browser
  * global.
  */
+/**
+ * Villager figure geometry, shared by the stylesheet and the bundle body.
+ *
+ * Taken verbatim from Mojang's own model — `Mojang/bedrock-samples`,
+ * `resource_pack/models/entity/villager.geo.json`, whose Bedrock cube list
+ * matches the Java villager. Each cube's `uv` is a Minecraft box-UV origin, and
+ * the FRONT face of a `w x h x d` cube sits at `(u + d, v + d)` sized `w x h`:
+ *
+ *   cube                origin              size     uv      front      piece
+ *   head                [-4, 24, -4]        8,10, 8  [ 0, 0] ( 8, 8)  8x10
+ *   nose                [-1, 23, -6]        2, 4, 2  [24, 0] (26, 2)  2x4
+ *   body                [-4, 12, -3]        8,12, 6  [16,20] (22,26)  8x12
+ *   robe  (inflate .5)  [-4,  6, -3]        8,18, 6  [ 0,38] ( 6,44)  8x18
+ *   arm L / R           [-8,16,-2]/[4,16,-2] 4, 8, 4 [44,22] (48,26)  4x8
+ *   forearms            [-4, 16, -2]        8, 4, 4  [40,38] (44,42)  8x4
+ *   leg L / R           [-4, 0,-2]/[ 0, 0,-2] 4,12, 4 [ 0,22] ( 4,26)  4x12
+ *
+ * The model spans y 0..34 with the feet at 0, so the canvas is 34 tall with the
+ * head on top and `canvasY = 34 - modelY`. Every number stays integral, which is
+ * what keeps the 4x nearest-neighbour upscale crisp.
+ *
+ * Two cubes were missing before this was derived from the model: the robe, which
+ * is what makes the figure look dressed, and the folded forearms. The robe's
+ * front face is fully transparent in the base skin — the game paints it from the
+ * villager TYPE overlay at the same UVs — so it only shows once that second
+ * texture is present.
+ *
+ * Order is back-to-front. Forearms go last so the folded arms sit over the robe,
+ * and the robe covers the legs down to the hem, leaving bare shins below.
+ */
+const FIGURE_SCALE = 4
+const FIGURE_PARTS = [
+  { sx: 4,  sy: 26, w: 4, h: 12, dx: 4,  dy: 22 }, // leg  [-4, 0,-2]
+  { sx: 4,  sy: 26, w: 4, h: 12, dx: 8,  dy: 22 }, // leg  [ 0, 0,-2]
+  { sx: 48, sy: 26, w: 4, h: 8,  dx: 0,  dy: 10 }, // arm  [-8,16,-2]
+  { sx: 48, sy: 26, w: 4, h: 8,  dx: 12, dy: 10 }, // arm  [ 4,16,-2]
+  { sx: 22, sy: 26, w: 8, h: 12, dx: 4,  dy: 10 }, // body [-4,12,-3]
+  { sx: 6,  sy: 44, w: 8, h: 18, dx: 4,  dy: 10 }, // robe [-4, 6,-3]
+  { sx: 8,  sy: 8,  w: 8, h: 10, dx: 4,  dy: 0  }, // head [-4,24,-4]
+  { sx: 26, sy: 2,  w: 2, h: 4,  dx: 7,  dy: 7  }, // nose [-1,23,-6]
+  { sx: 44, sy: 42, w: 8, h: 4,  dx: 4,  dy: 14 }, // forearms [-4,16,-2]
+]
+
+/**
+ * Collapsed floating head: the face plus its nose. The nose hangs one pixel
+ * below the chin in the model (y 23..27 against a head ending at 24), so this
+ * canvas is 11 tall rather than the head's 10.
+ */
+const FACE_SCALE = 4
+const FACE_PARTS = [
+  { sx: 8,  sy: 8, w: 8, h: 10, dx: 0, dy: 0 },
+  { sx: 26, sy: 2, w: 2, h: 4,  dx: 3, dy: 7 },
+]
+
+/** Canvas extents are derived, so editing a part cannot desync the stylesheet. */
+const canvasExtent = (parts) => ({
+  w: parts.reduce((max, part) => Math.max(max, part.dx + part.w), 0),
+  h: parts.reduce((max, part) => Math.max(max, part.dy + part.h), 0),
+})
+const FIGURE_EXTENT = canvasExtent(FIGURE_PARTS)
+const FACE_EXTENT = canvasExtent(FACE_PARTS)
+
+/** The fetched skins are 64x64 box-UV atlases. */
+const TEXTURE_PX = 64
+
+/**
+ * Inline crop for one piece, scaled by `scale`. Every background layer shares
+ * the piece's UV, which is what makes the type overlay line up with the base
+ * skin pixel for pixel. `layers` is ordered topmost first, per CSS.
+ */
+function partStyle(part, scale, layers) {
+  const size = (TEXTURE_PX * scale) + 'px ' + (TEXTURE_PX * scale) + 'px'
+  const position = (-part.sx * scale) + 'px ' + (-part.sy * scale) + 'px'
+  return {
+    left: part.dx * scale + 'px',
+    top: part.dy * scale + 'px',
+    width: part.w * scale + 'px',
+    height: part.h * scale + 'px',
+    backgroundImage: layers.join(','),
+    backgroundPosition: layers.map(() => position).join(','),
+    backgroundSize: layers.map(() => size).join(','),
+  }
+}
+
 window.__ModuleLoader__.load({
   id: 'dsh-villager-hmm',
   factory: (require) => {
@@ -24,55 +108,16 @@ window.__ModuleLoader__.load({
     const MIN_GAP_MS = 260
 
     /**
-     * Full-body villager, composited from the fetched 64x64 skin.
+     * Background layers for one piece, topmost first (CSS order).
      *
-     * Minecraft's box UVs put the FRONT face of a box at (u + d, v + d) sized
-     * w x h. Villagers use a custom model, so these are its offsets rather than
-     * a player skin's:
-     *   head texOffs(0,0)    8x10x8 -> front ( 8,  8)  8x10
-     *   nose texOffs(24,0)   2x4x2  -> front (26,  2)  2x4
-     *   body texOffs(16,20)  8x12x6 -> front (22, 26)  8x12
-     *   arm  texOffs(44,22)  4x8x4  -> front (48, 26)  4x8
-     *   leg  texOffs(0,22)   4x12x4 -> front ( 4, 26)  4x12
-     * `dx`/`dy` place each piece on a 16x34 canvas; scale 4 renders it at
-     * 64x136. Every number stays integral so pixelated scaling stays crisp.
+     * The type overlay carries the robe; it is drawn over the base skin at the
+     * same UV. When it has not been fetched the figure still renders, in the
+     * base skin's under-robe, and the panel says the robe is missing.
      */
-    const FIGURE_SCALE = 4
-    const FIGURE_PARTS = [
-      { sx: 8, sy: 8, w: 8, h: 10, dx: 4, dy: 0 },
-      { sx: 26, sy: 2, w: 2, h: 4, dx: 7, dy: 2 },
-      { sx: 22, sy: 26, w: 8, h: 12, dx: 4, dy: 10 },
-      { sx: 48, sy: 26, w: 4, h: 8, dx: 0, dy: 10 },
-      { sx: 48, sy: 26, w: 4, h: 8, dx: 12, dy: 10 },
-      { sx: 4, sy: 26, w: 4, h: 12, dx: 4, dy: 22 },
-      { sx: 4, sy: 26, w: 4, h: 12, dx: 8, dy: 22 },
-    ]
-    /** Inline crop for one figure piece. */
-    const partStyle = (part) => ({
-      left: part.dx * FIGURE_SCALE + 'px',
-      top: part.dy * FIGURE_SCALE + 'px',
-      width: part.w * FIGURE_SCALE + 'px',
-      height: part.h * FIGURE_SCALE + 'px',
-      backgroundPosition: -part.sx * FIGURE_SCALE + 'px ' + -part.sy * FIGURE_SCALE + 'px',
-    })
-
-    /**
-     * Collapsed floating head: the 8x10 face plus the 2x4 nose, laid out on a
-     * 9x10 canvas and rendered at 36x40 by the same 4x scale as the figure.
-     */
-    const FACE_PARTS = [
-      { sx: 8, sy: 8, w: 8, h: 10, dx: 0, dy: 0 },
-      { sx: 26, sy: 2, w: 2, h: 4, dx: 3, dy: 2 },
-    ]
-    /** Scale for the collapsed head, matching FIGURE_SCALE for crisp pixels. */
-    const FACE_SCALE = 4
-    const faceStyle = (part) => ({
-      left: part.dx * FACE_SCALE + 'px',
-      top: part.dy * FACE_SCALE + 'px',
-      width: part.w * FACE_SCALE + 'px',
-      height: part.h * FACE_SCALE + 'px',
-      backgroundPosition: -part.sx * FACE_SCALE + 'px ' + -part.sy * FACE_SCALE + 'px',
-    })
+    const textureLayers = (withType) => {
+      const base = 'url("' + PREFIX + '/texture.png")'
+      return withType ? ['url("' + PREFIX + '/type.png")', base] : [base]
+    }
 
     // ---------------------------------------------------------------- store
 
@@ -93,6 +138,7 @@ window.__ModuleLoader__.load({
       recent: [],
       soundCount: 0,
       hasTexture: false,
+      hasType: false,
       assetDir: '',
       setupCommand: 'npx dsh-villager-hmm-assets',
       blocked: false,
@@ -202,6 +248,7 @@ window.__ModuleLoader__.load({
           recent: Array.isArray(data.recent) ? data.recent.slice(-8) : [],
           soundCount: data.soundCount,
           hasTexture: data.hasTexture === true,
+          hasType: data.hasType === true,
           assetDir: typeof data.assetDir === 'string' ? data.assetDir : '',
           setupCommand: typeof data.setupCommand === 'string' ? data.setupCommand : state.setupCommand,
           patternError: data.patternError ? String(data.patternError) : null,
@@ -362,6 +409,7 @@ window.__ModuleLoader__.load({
         expand: 'Expand',
         expandHint: 'Expand · double-click to reset',
         noTexture: 'texture not fetched',
+        noType: 'Type overlay not fetched — the villager has no robe yet',
         errAudio: 'Could not create an audio element: ',
         errPlay: 'Playback failed: ',
         errBlocked: 'The browser blocked autoplay: ',
@@ -400,6 +448,7 @@ window.__ModuleLoader__.load({
         expand: '展开',
         expandHint: '展开 · 双击复位',
         noTexture: '贴图未获取',
+        noType: '未获取类型覆盖层，村民还没有袍子',
         errAudio: '无法创建音频对象：',
         errPlay: '播放失败：',
         errBlocked: '浏览器拦截了自动播放：',
@@ -418,12 +467,16 @@ window.__ModuleLoader__.load({
 
     function Overlay() {
       const s = useStore()
+      const layers = textureLayers(s.hasType)
       const figure = s.hasTexture
         ? h('div', {
             // A fresh key remounts the node so the CSS animation replays.
             key: 'figure-' + s.hitSeq,
             className: 'vhm-figure' + (s.hitSeq > 0 ? ' vhm-figure-hit' : ''),
-          }, FIGURE_PARTS.map((part, index) => h('i', { key: index, style: partStyle(part) })))
+            // The robe comes from the overlay; without it the villager is drawn
+            // in the base skin's under-robe, which is worth saying out loud.
+            title: s.hasType ? t('dragHint') : t('noType'),
+          }, FIGURE_PARTS.map((part, index) => h('i', { key: index, style: partStyle(part, FIGURE_SCALE, layers) })))
         : h('div', { className: 'vhm-figure vhm-figure-missing', title: t('noTexture') }, '?')
 
       // A dragged position pins the panel with left/top, so the stylesheet's
@@ -452,7 +505,7 @@ window.__ModuleLoader__.load({
             ? h('div', {
                 key: 'head-' + s.hitSeq,
                 className: 'vhm-min-face vhm-face' + (s.hitSeq > 0 ? ' vhm-min-hit' : ''),
-              }, FACE_PARTS.map((part, index) => h('i', { key: index, style: faceStyle(part) })))
+              }, FACE_PARTS.map((part, index) => h('i', { key: index, style: partStyle(part, FACE_SCALE, layers) })))
             : h('div', { className: 'vhm-min-face vhm-figure-missing' }, '?'),
           ),
         )
@@ -659,29 +712,33 @@ const CSS = [
   '.vhm-ov-min{width:auto;}',
   // Collapsed: a bare floating head, nothing but the villager's face.
   '.vhm-ov-min{border:none;background:transparent;box-shadow:none;overflow:visible;}',
-  '.vhm-min{cursor:grab;touch-action:none;user-select:none;width:36px;height:40px;position:relative;',
+  '.vhm-min{cursor:grab;touch-action:none;user-select:none;position:relative;',
+  'width:' + (FACE_EXTENT.w * FACE_SCALE) + 'px;height:' + (FACE_EXTENT.h * FACE_SCALE) + 'px;',
   'image-rendering:pixelated;filter:drop-shadow(0 3px 6px rgba(0,0,0,.4));transform-origin:50% 100%;}',
   '.vhm-min:active{cursor:grabbing;}',
   '.vhm-min:hover .vhm-min-face{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px;}',
   '.vhm-min-face{position:absolute;inset:0;}',
-  '.vhm-min-face i{position:absolute;display:block;background-repeat:no-repeat;',
-  'background-image:url("/dsh-villager-hmm/texture.png");background-size:256px 256px;}',
+  // The image, its scale and every crop offset are inline (partStyle), because
+  // they all derive from FIGURE_*/FACE_* and the layer count. Duplicating the
+  // scale here is what used to let the stylesheet and the parts drift apart.
+  '.vhm-min-face i{position:absolute;display:block;background-repeat:no-repeat;}',
   '.vhm-bar{display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--dsw-alias-bg-layer-2);',
   'cursor:grab;touch-action:none;user-select:none;}',
   '.vhm-bar:active{cursor:grabbing;}',
   '.vhm-barinfo{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1;}',
-  // The fetched villager.png is the full 64x64 skin. Each `i` inside the figure
-  // crops one body part out of it; see FIGURE_PARTS for the UV derivation.
-  '.vhm-figure{position:relative;width:64px;height:136px;flex:none;image-rendering:pixelated;',
+  // Each `i` crops one model cube out of the fetched 64x64 skin; see the
+  // geometry block at the top of this file for the box-UV derivation.
+  '.vhm-figure{position:relative;flex:none;image-rendering:pixelated;',
+  'width:' + (FIGURE_EXTENT.w * FIGURE_SCALE) + 'px;height:' + (FIGURE_EXTENT.h * FIGURE_SCALE) + 'px;',
   'transform-origin:50% 88%;}',
-  '.vhm-figure i{position:absolute;display:block;background-repeat:no-repeat;',
-  'background-image:url("/dsh-villager-hmm/texture.png");background-size:256px 256px;}',
+  '.vhm-figure i{position:absolute;display:block;background-repeat:no-repeat;}',
   '.vhm-figure-missing{display:flex;align-items:center;justify-content:center;width:44px;height:44px;',
   'background:var(--dsw-alias-bg-layer-1);border-radius:8px;color:var(--dsw-alias-label-secondary);',
   'font-size:16px;}',
   // The missing-texture placeholder inside the collapsed head needs a tighter
   // box than the expanded figure's 44x44.
-  '.vhm-min .vhm-figure-missing{width:36px;height:40px;border-radius:10px;}',
+  '.vhm-min .vhm-figure-missing{width:' + (FACE_EXTENT.w * FACE_SCALE) + 'px;',
+  'height:' + (FACE_EXTENT.h * FACE_SCALE) + 'px;border-radius:10px;}',
   '.vhm-figure-hit{animation:vhm-bob .46s cubic-bezier(.36,.07,.19,.97);}',
   '@keyframes vhm-bob{0%{transform:translateY(0) scale(1) rotate(0)}',
   '16%{transform:translateY(-6px) scale(1.16) rotate(-7deg)}',

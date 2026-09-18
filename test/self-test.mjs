@@ -51,6 +51,7 @@ const cacheDir = mkdtempSync(join(tmpdir(), 'vhm-assets-'))
 writeFileSync(join(cacheDir, 'idle1.ogg'), makeOgg())
 writeFileSync(join(cacheDir, 'idle2.ogg'), makeOgg())
 writeFileSync(join(cacheDir, 'villager.png'), makePng(64, 64))
+writeFileSync(join(cacheDir, 'villager-type.png'), makePng(64, 64))
 // An empty cache: the state a fresh install is in before the fetch script runs.
 const emptyDir = mkdtempSync(join(tmpdir(), 'vhm-empty-'))
 
@@ -144,6 +145,7 @@ check('reports a missing asset set instead of failing', () => {
   assert.ok(existsSync(mod.FETCH_SCRIPT), 'the suggested script must exist: ' + mod.FETCH_SCRIPT)
   assert.equal(callOn(bare, '/dsh-villager-hmm/sound/0.ogg').status, 404)
   assert.equal(callOn(bare, '/dsh-villager-hmm/texture.png').status, 404)
+  assert.equal(callOn(bare, '/dsh-villager-hmm/type.png').status, 404)
 })
 
 // The scanning suite runs in reasoning-only mode so each case is isolated.
@@ -255,12 +257,17 @@ check('serves the fetched assets with the right magic', () => {
   // The client crops the head front out of this 64x64 skin.
   assert.equal(texture.body.readUInt32BE(16), 64)
   assert.equal(texture.body.readUInt32BE(20), 64)
+  // The type overlay is a second 64x64 atlas addressed by the same UVs.
+  const type = call('/dsh-villager-hmm/type.png')
+  assert.equal(type.status, 200)
+  assert.equal(type.body.subarray(0, 8).toString('hex'), '89504e470d0a1a0a', 'not a PNG')
 })
 
 check('reports the fetched asset set', () => {
   const state = getJson('/dsh-villager-hmm/state?cursor=999999')
   assert.equal(state.soundCount, 2)
   assert.equal(state.hasTexture, true)
+  assert.equal(state.hasType, true)
 })
 
 check('rejects unknown routes and out-of-range sounds', () => {
@@ -323,6 +330,89 @@ check('materializes into a cordis client plugin', () => {
   assert.equal(exportsObject.name, 'dsh-villager-hmm/client')
   assert.deepEqual(exportsObject.inject, ['slots'])
   assert.equal(typeof exportsObject.apply, 'function')
+})
+
+/**
+ * The bundle defines its figure geometry at module scope, so a probe copy of
+ * the source can hand it back. It is the only way to test the box-UV crops:
+ * they never reach the React tree in a form the fake renderer can read.
+ */
+const geometry = () => new Function(
+  'window', 'document', 'fetch', 'Audio', 'setInterval', 'clearInterval',
+  source + '\n;return { FIGURE_PARTS, FIGURE_EXTENT, FACE_PARTS, FACE_EXTENT, partStyle }',
+)(fakeWindow, fakeDocument, () => Promise.resolve({ ok: false }), function Audio() {}, () => 0, () => {})
+
+check('draws exactly the cubes of the villager model', () => {
+  const g = geometry()
+  // Front faces of Mojang's villager.geo.json (bedrock-samples): a cube with
+  // origin o, size w/h/d and uv u/v shows (u + d, v + d) sized w x h, and the
+  // canvas is flipped so canvasY = 34 - modelY. The body and the robe share a
+  // canvas origin — the robe is simply the taller cube painted over it — so
+  // this compares the whole list, which also pins the back-to-front order.
+  assert.deepEqual(g.FIGURE_PARTS, [
+    { sx: 4,  sy: 26, w: 4, h: 12, dx: 4,  dy: 22 }, // leg0     [-4, 0,-2] 4,12,4
+    { sx: 4,  sy: 26, w: 4, h: 12, dx: 8,  dy: 22 }, // leg1     [ 0, 0,-2]
+    { sx: 48, sy: 26, w: 4, h: 8,  dx: 0,  dy: 10 }, // arm      [-8,16,-2] 4, 8,4
+    { sx: 48, sy: 26, w: 4, h: 8,  dx: 12, dy: 10 }, // arm      [ 4,16,-2]
+    { sx: 22, sy: 26, w: 8, h: 12, dx: 4,  dy: 10 }, // body     [-4,12,-3] 8,12,6
+    { sx: 6,  sy: 44, w: 8, h: 18, dx: 4,  dy: 10 }, // robe     [-4, 6,-3] 8,18,6
+    { sx: 8,  sy: 8,  w: 8, h: 10, dx: 4,  dy: 0  }, // head     [-4,24,-4] 8,10,8
+    { sx: 26, sy: 2,  w: 2, h: 4,  dx: 7,  dy: 7  }, // nose     [-1,23,-6] 2, 4,2
+    { sx: 44, sy: 42, w: 8, h: 4,  dx: 4,  dy: 14 }, // forearms [-4,16,-2] 8, 4,4
+  ])
+  assert.deepEqual(g.FACE_PARTS, [
+    { sx: 8,  sy: 8, w: 8, h: 10, dx: 0, dy: 0 },
+    { sx: 26, sy: 2, w: 2, h: 4,  dx: 3, dy: 7 },
+  ])
+})
+
+check('places the nose over the mouth, not the eyes', () => {
+  const g = geometry()
+  const head = g.FIGURE_PARTS.find((p) => p.dx === 4 && p.dy === 0)
+  const nose = g.FIGURE_PARTS.find((p) => p.sx === 26)
+  // Eyes are rows 5..6 of the head's 8x10 front face. The nose origin is
+  // [-1,23,-6] against a head at [-4,24,-4], i.e. head-local (3,7).
+  assert.equal(nose.dx - head.dx, 3, 'the nose is not centred on the face')
+  assert.equal(nose.dy - head.dy, 7, 'the nose must clear the eyes and sit over the mouth')
+})
+
+check('draws the robe and the folded forearms', () => {
+  const g = geometry()
+  const robe = g.FIGURE_PARTS.find((p) => p.sy === 44)
+  assert.ok(robe, 'the robe cube is missing, which left the villager undressed')
+  assert.equal(robe.h, 18, 'the robe must reach past the waist to the ankles')
+  const forearms = g.FIGURE_PARTS.find((p) => p.sy === 42)
+  assert.ok(forearms, 'the folded forearms are missing')
+  // Back-to-front: the forearms are drawn last so they sit over the robe.
+  assert.equal(g.FIGURE_PARTS.at(-1), forearms, 'the forearms must paint over the robe')
+})
+
+check('derives every stylesheet size from one scale', () => {
+  const g = geometry()
+  assert.deepEqual(g.FIGURE_EXTENT, { w: 16, h: 34 }, 'figure canvas')
+  assert.deepEqual(g.FACE_EXTENT, { w: 8, h: 11 }, 'the nose overhangs the chin by one')
+  // The sheet used to repeat FIGURE_SCALE = 4 as 256px / 64px / 136px / 36px,
+  // which is what made the sizes drift apart from the parts.
+  assert.ok(!/256px/.test(source), 'the stylesheet must not hard-code the texture scale')
+  assert.ok(!/\.vhm-figure\{[^}]*width:64px/.test(source), 'the stylesheet must not hard-code the figure size')
+  assert.ok(!/\.vhm-min\{[^}]*width:36px/.test(source), 'the stylesheet must not hard-code the head size')
+})
+
+check('scales and layers one piece consistently', () => {
+  const g = geometry()
+  const part = { sx: 8, sy: 8, w: 8, h: 10, dx: 4, dy: 0 }
+  const single = g.partStyle(part, 4, ['url(base)'])
+  assert.equal(single.left, '16px')
+  assert.equal(single.width, '32px')
+  assert.equal(single.height, '40px')
+  assert.equal(single.backgroundPosition, '-32px -32px')
+  assert.equal(single.backgroundSize, '256px 256px')
+  // Two layers need one position/size entry each, or the overlay samples the
+  // wrong crop.
+  const layered = g.partStyle(part, 4, ['url(type)', 'url(base)'])
+  assert.equal(layered.backgroundImage, 'url(type),url(base)')
+  assert.equal(layered.backgroundPosition, '-32px -32px,-32px -32px')
+  assert.equal(layered.backgroundSize, '256px 256px,256px 256px')
 })
 
 check('apply() polls the host and registers the overlay slot', () => {
@@ -418,7 +508,7 @@ const renderPanel = (locale) => {
         json: async () => ({
           version: 2, cursor: 0, triggers: [], total: 0, enabled: true, mode: 'both',
           pattern: 'x', patternError: null, reasoningChars: 0, textChars: 0, recent: [],
-          soundCount: 2, hasTexture: true, assetDir: '.', setupCommand: 'x', defaultPattern: 'x',
+          soundCount: 2, hasTexture: true, hasType: true, assetDir: '.', setupCommand: 'x', defaultPattern: 'x',
         }),
       }
     }
