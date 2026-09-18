@@ -207,24 +207,25 @@ the canvas extents computed from the part list, so editing a part cannot leave
 the stylesheet behind. Coordinates stay integral, which is what keeps the 4x
 nearest-neighbour upscale crisp.
 
-## Petting and zoom
+## Petting
 
-The villager is interactive on its own, independently of the hmm scanner:
+Collapsing the panel leaves the villager's head floating on its own, and that
+head is a pet:
 
-- **Pet it** — click the body and it flinches, flashes red and grunts. The red
-  is the game's damage overlay: an `feColorMatrix` that keeps the red channel
-  and crushes green and blue. (A `hue-rotate`/`sepia` chain was tried first and
+- **Click it** — the head flinches, flashes red and grunts. The red is the
+  game's damage overlay: an `feColorMatrix` that keeps the red channel and
+  crushes green and blue. (A `hue-rotate`/`sepia` chain was tried first and
   cannot do this job — hue-rotate is a linear approximation, so as soon as the
   saturation is high enough to read as "hurt" the result lands on orange or
   magenta instead of red.)
-- **Enlarge it** — the `1×` / `2×` button in the panel header scales the sprite
-  on its own. The factor is an integer multiple of `FIGURE_SCALE`, so the
-  enlarged sprite still lands on exact pixel boundaries and stays crisp. The
-  button reads out the factor currently in effect.
+- **The `▣` button under it** restores the full panel. Petting and restoring are
+  separate controls on purpose: folding both onto the head's click is what made
+  the head unpetable in the first place.
 
-Both work whether or not the scanner is paused, and neither touches the host:
-a pet plays a damage clip straight away rather than waiting behind the
-rate-limited queue that the ambient hmm sounds go through.
+The expanded panel's body reacts to a click the same way, so the villager can be
+petted in either form. Neither path touches the host: a pet plays a damage clip
+straight away rather than waiting behind the rate-limited queue that the ambient
+hmm sounds go through.
 
 The tint lives inside the `@keyframes`, never on the class that starts them.
 An element keeps its class after an animation ends, so a `filter` declared on

@@ -38,12 +38,6 @@
  * and the robe covers the legs down to the hem, leaving bare shins below.
  */
 const FIGURE_SCALE = 4
-/**
- * The enlarge button's factor. An integer multiple of FIGURE_SCALE so the
- * zoomed sprite still lands on exact pixel boundaries, which is what keeps the
- * nearest-neighbour upscale crisp instead of blurry.
- */
-const ZOOM_FACTOR = 2
 const FIGURE_PARTS = [
   { sx: 4,  sy: 26, w: 4, h: 12, dx: 4,  dy: 22 }, // leg  [-4, 0,-2]
   { sx: 4,  sy: 26, w: 4, h: 12, dx: 8,  dy: 22 }, // leg  [ 0, 0,-2]
@@ -166,7 +160,6 @@ window.__ModuleLoader__.load({
       hasTexture: false,
       hasType: false,
       hurtCount: 0,
-      zoomed: false,
       petSeq: 0,
       lastAnim: '',
       assetDir: '',
@@ -492,12 +485,10 @@ window.__ModuleLoader__.load({
         dragHint: 'Drag to move · double-click to reset',
         collapse: 'Collapse',
         expand: 'Expand',
-        expandHint: 'Expand · double-click to reset',
         noTexture: 'texture not fetched',
         noType: 'Type overlay not fetched — the villager has no robe yet',
         petHint: 'Click the villager to pet it',
-        zoomIn: 'Enlarge the villager',
-        zoomOut: 'Shrink the villager',
+        openPanel: 'Expand the panel',
         errAudio: 'Could not create an audio element: ',
         errPlay: 'Playback failed: ',
         errBlocked: 'The browser blocked autoplay: ',
@@ -534,12 +525,10 @@ window.__ModuleLoader__.load({
         dragHint: '拖动可移动 · 双击复位',
         collapse: '收起',
         expand: '展开',
-        expandHint: '展开 · 双击复位',
         noTexture: '贴图未获取',
         noType: '未获取类型覆盖层，村民还没有袍子',
         petHint: '点一下摸摸村民',
-        zoomIn: '放大村民',
-        zoomOut: '缩小村民',
+        openPanel: '展开面板',
         errAudio: '无法创建音频对象：',
         errPlay: '播放失败：',
         errBlocked: '浏览器拦截了自动播放：',
@@ -559,9 +548,6 @@ window.__ModuleLoader__.load({
     function Overlay() {
       const s = useStore()
       const layers = textureLayers(s.hasType)
-      // The container is sized from the same integers the pieces are cropped
-      // with, so enlarging it cannot desync the crops from the box.
-      const scale = FIGURE_SCALE * (s.zoomed ? ZOOM_FACTOR : 1)
       const figure = s.hasTexture
         ? h('div', {
             // A fresh key remounts the node so the CSS animation replays.
@@ -569,15 +555,11 @@ window.__ModuleLoader__.load({
             className: 'vhm-figure'
               + (s.lastAnim === 'hit' ? ' vhm-figure-hit' : '')
               + (s.lastAnim === 'pet' ? ' vhm-pet' : ''),
-            style: {
-              width: (FIGURE_EXTENT.w * scale) + 'px',
-              height: (FIGURE_EXTENT.h * scale) + 'px',
-            },
             // The robe comes from the overlay; without it the villager is drawn
             // in the base skin's under-robe, which is worth saying out loud.
             title: s.hasType ? t('petHint') : t('noType'),
             onClick: () => { if (!drag.moved) pet() },
-          }, FIGURE_PARTS.map((part, index) => h('i', { key: index, style: partStyle(part, scale, layers) })))
+          }, FIGURE_PARTS.map((part, index) => h('i', { key: index, style: partStyle(part, FIGURE_SCALE, layers) })))
         : h('div', { className: 'vhm-figure vhm-figure-missing', title: t('noTexture') }, '?')
 
       // A dragged position pins the panel with left/top, so the stylesheet's
@@ -586,28 +568,35 @@ window.__ModuleLoader__.load({
         ? { left: s.pos.left + 'px', top: s.pos.top + 'px', right: 'auto', bottom: 'auto' }
         : null
 
-      // Collapsed shows nothing but the villager's head: the figure doubles as
-      // the toggle, and drag/expand handlers live on it directly.
+      // Collapsed is the desktop-pet form: the head alone, and clicking it pets
+      // the villager. Restoring the panel therefore needs its own control —
+      // folding that onto the head's click is what made the head unpetable.
       if (!s.open) {
         return h('div', { className: 'vhm-ov vhm-ov-min', style: placed },
-          h('div', {
-            className: 'vhm-min',
-            title: t('expandHint'),
-            onPointerDown: onBarDown,
-            onPointerMove: onBarMove,
-            onPointerUp: onBarUp,
-            onPointerCancel: onBarUp,
-            onDoubleClick: onBarDoubleClick,
-            onClick: (event) => {
-              if (drag.moved) return
-              state.open = true; notify()
-            },
-          }, s.hasTexture
-            ? h('div', {
-                key: 'head-' + s.hitSeq,
-                className: 'vhm-min-face vhm-face' + (s.hitSeq > 0 ? ' vhm-min-hit' : ''),
-              }, FACE_PARTS.map((part, index) => h('i', { key: index, style: partStyle(part, FACE_SCALE, layers) })))
-            : h('div', { className: 'vhm-min-face vhm-figure-missing' }, '?'),
+          h('div', { className: 'vhm-min-wrap' },
+            h('div', {
+              className: 'vhm-min',
+              title: s.hasTexture ? t('petHint') : t('noTexture'),
+              onPointerDown: onBarDown,
+              onPointerMove: onBarMove,
+              onPointerUp: onBarUp,
+              onPointerCancel: onBarUp,
+              onDoubleClick: onBarDoubleClick,
+              onClick: () => { if (!drag.moved) pet() },
+            }, s.hasTexture
+              ? h('div', {
+                  key: 'head-' + s.hitSeq + ':' + s.petSeq,
+                  className: 'vhm-min-face vhm-face'
+                    + (s.lastAnim === 'hit' ? ' vhm-min-hit' : '')
+                    + (s.lastAnim === 'pet' ? ' vhm-pet' : ''),
+                }, FACE_PARTS.map((part, index) => h('i', { key: index, style: partStyle(part, FACE_SCALE, layers) })))
+              : h('div', { className: 'vhm-min-face vhm-figure-missing' }, '?'),
+            ),
+            h('button', {
+              className: 'vhm-min-open',
+              title: t('openPanel'),
+              onClick: () => { state.open = true; notify() },
+            }, '▣'),
           ),
         )
       }
@@ -628,14 +617,6 @@ window.__ModuleLoader__.load({
             h('span', { className: 'vhm-count' },
               t('hits') + ' ' + String(s.total) + ' · ' + t('played') + ' ' + String(s.played)),
           ),
-          // Enlarge the villager on its own. The label shows the factor
-          // currently in effect, so the button doubles as the readout.
-          h('button', {
-            className: 'vhm-icon vhm-zoom',
-            title: s.zoomed ? t('zoomOut') : t('zoomIn'),
-            'aria-pressed': s.zoomed,
-            onClick: () => { state.zoomed = !state.zoomed; notify() },
-          }, s.zoomed ? ZOOM_FACTOR + '×' : '1×'),
           h('button', {
             className: 'vhm-icon',
             title: s.open ? t('collapse') : t('expand'),
@@ -911,11 +892,13 @@ const CSS = [
   'border-radius:6px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);',
   'color:var(--dsw-alias-label-primary);}',
   '.vhm-icon:hover{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary);}',
-  // The zoom label is two glyphs wide, so it needs more room than the square
-  // icon buttons, and it reads as pressed while the villager is enlarged.
-  '.vhm-zoom{width:auto;min-width:30px;padding:0 5px;font-size:11px;',
-  'font-variant-numeric:tabular-nums;}',
-  '.vhm-zoom[aria-pressed="true"]{border-color:var(--dsw-alias-brand-primary);',
+  // Collapsed form: the head, plus its own control for restoring the panel,
+  // because clicking the head pets the villager instead.
+  '.vhm-min-wrap{display:flex;flex-direction:column;align-items:center;gap:3px;}',
+  '.vhm-min-open{cursor:pointer;font:inherit;font-size:10px;line-height:1;width:22px;height:16px;flex:none;',
+  'border-radius:5px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);',
+  'color:var(--dsw-alias-label-secondary);opacity:.75;}',
+  '.vhm-min-open:hover{opacity:1;border-color:var(--dsw-alias-brand-primary);',
   'color:var(--dsw-alias-brand-primary);}',
   '.vhm-body{display:flex;flex-direction:column;gap:9px;padding:11px 13px;}',
   '.vhm-stats{display:flex;gap:14px;flex-wrap:wrap;color:var(--dsw-alias-label-secondary);font-size:12px;}',

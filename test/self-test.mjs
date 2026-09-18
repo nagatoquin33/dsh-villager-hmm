@@ -749,21 +749,41 @@ await checkAsync('a pet does not wait behind hmm hits', async () => {
   assert.equal(audio.length, 3, 'expected three clips, got ' + audio.length)
 })
 
-await checkAsync('the zoom button enlarges the villager on its own', async () => {
+/** Collapse the panel and hand back the tree in its desktop-pet form. */
+const collapsePanel = (Panel, walk) => {
+  const toggle = walk(Panel({})).find((node) =>
+    node.type === 'button' && node.props.className === 'vhm-icon')
+  assert.ok(toggle, 'the collapse button was not rendered')
+  toggle.props.onClick()
+  return walk(Panel({}))
+}
+
+await checkAsync('petting the collapsed head plays a damage clip and does not expand', async () => {
+  const { Panel, walk, audio } = renderPanel()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  const head = collapsePanel(Panel, walk).find((node) => node.props.className === 'vhm-min')
+  assert.ok(head, 'the collapsed head was not rendered')
+  head.props.onClick()
+  assert.equal(audio.length, 1, 'expected one clip, got ' + audio.length)
+  assert.ok(/\/hurt\/\d+\.ogg$/.test(audio[0]), 'a pet must play a damage clip, got ' + audio[0])
+  // Folding "restore the panel" onto the head's click is exactly what made the
+  // head unpetable, so a pet must leave the panel collapsed.
+  assert.equal(
+    Panel({}).props.className, 'vhm-ov vhm-ov-min',
+    'petting the head must not expand the panel',
+  )
+})
+
+await checkAsync('the collapsed head restores the panel from its own button', async () => {
   const { Panel, walk } = renderPanel()
   await new Promise((resolve) => setTimeout(resolve, 0))
-  const zoom = walk(Panel({})).find((node) =>
-    node.type === 'button'
-    && typeof node.props.className === 'string'
-    && node.props.className.includes('vhm-zoom'))
-  assert.ok(zoom, 'the zoom button was not rendered')
-  assert.equal(findFigure(Panel, walk).props.style.width, '64px', 'the default figure is 16 * 4')
-  assert.equal(findFigure(Panel, walk).props.style.height, '136px', 'the default figure is 34 * 4')
-  zoom.props.onClick()
-  assert.equal(findFigure(Panel, walk).props.style.width, '128px', 'zooming must double the figure')
-  assert.equal(findFigure(Panel, walk).props.style.height, '272px')
-  zoom.props.onClick()
-  assert.equal(findFigure(Panel, walk).props.style.width, '64px', 'clicking again must restore the size')
+  const collapsed = collapsePanel(Panel, walk)
+  assert.equal(Panel({}).props.className, 'vhm-ov vhm-ov-min', 'the panel should start collapsed')
+  const open = collapsed.find((node) =>
+    node.type === 'button' && node.props.className === 'vhm-min-open')
+  assert.ok(open, 'the restore button was not rendered')
+  open.props.onClick()
+  assert.equal(Panel({}).props.className, 'vhm-ov', 'the restore button must expand the panel')
 })
 
 await checkAsync('the default anchor is not the bottom-right corner', async () => {
