@@ -30,6 +30,7 @@ window.__ModuleLoader__.load({
      * w x h. Villagers use a custom model, so these are its offsets rather than
      * a player skin's:
      *   head texOffs(0,0)    8x10x8 -> front ( 8,  8)  8x10
+     *   nose texOffs(24,0)   2x4x2  -> front (26,  2)  2x4
      *   body texOffs(16,20)  8x12x6 -> front (22, 26)  8x12
      *   arm  texOffs(44,22)  4x8x4  -> front (48, 26)  4x8
      *   leg  texOffs(0,22)   4x12x4 -> front ( 4, 26)  4x12
@@ -39,6 +40,7 @@ window.__ModuleLoader__.load({
     const FIGURE_SCALE = 4
     const FIGURE_PARTS = [
       { sx: 8, sy: 8, w: 8, h: 10, dx: 4, dy: 0 },
+      { sx: 26, sy: 2, w: 2, h: 4, dx: 7, dy: 2 },
       { sx: 22, sy: 26, w: 8, h: 12, dx: 4, dy: 10 },
       { sx: 48, sy: 26, w: 4, h: 8, dx: 0, dy: 10 },
       { sx: 48, sy: 26, w: 4, h: 8, dx: 12, dy: 10 },
@@ -52,6 +54,24 @@ window.__ModuleLoader__.load({
       width: part.w * FIGURE_SCALE + 'px',
       height: part.h * FIGURE_SCALE + 'px',
       backgroundPosition: -part.sx * FIGURE_SCALE + 'px ' + -part.sy * FIGURE_SCALE + 'px',
+    })
+
+    /**
+     * Collapsed floating head: the 8x10 face plus the 2x4 nose, laid out on a
+     * 9x10 canvas and rendered at 36x40 by the same 4x scale as the figure.
+     */
+    const FACE_PARTS = [
+      { sx: 8, sy: 8, w: 8, h: 10, dx: 0, dy: 0 },
+      { sx: 26, sy: 2, w: 2, h: 4, dx: 3, dy: 2 },
+    ]
+    /** Scale for the collapsed head, matching FIGURE_SCALE for crisp pixels. */
+    const FACE_SCALE = 4
+    const faceStyle = (part) => ({
+      left: part.dx * FACE_SCALE + 'px',
+      top: part.dy * FACE_SCALE + 'px',
+      width: part.w * FACE_SCALE + 'px',
+      height: part.h * FACE_SCALE + 'px',
+      backgroundPosition: -part.sx * FACE_SCALE + 'px ' + -part.sy * FACE_SCALE + 'px',
     })
 
     // ---------------------------------------------------------------- store
@@ -263,7 +283,7 @@ window.__ModuleLoader__.load({
       return { left: Math.max(0, Math.min(maxLeft, left)), top: Math.max(0, Math.min(maxTop, top)) }
     }
 
-    const drag = { active: false, offsetX: 0, offsetY: 0 }
+    const drag = { active: false, moved: false, offsetX: 0, offsetY: 0 }
 
     const onBarDown = (event) => {
       // A control inside the bar must stay clickable, not start a drag.
@@ -271,6 +291,7 @@ window.__ModuleLoader__.load({
       if (target && typeof target.closest === 'function' && target.closest('button') !== null) return
       const rect = event.currentTarget.getBoundingClientRect()
       drag.active = true
+      drag.moved = false
       drag.offsetX = event.clientX - rect.left
       drag.offsetY = event.clientY - rect.top
       try { event.currentTarget.setPointerCapture(event.pointerId) } catch (error) { /* optional */ }
@@ -278,6 +299,7 @@ window.__ModuleLoader__.load({
 
     const onBarMove = (event) => {
       if (!drag.active) return
+      drag.moved = true
       merge({ pos: clampPosition(event.clientX - drag.offsetX, event.clientY - drag.offsetY) })
     }
 
@@ -338,6 +360,7 @@ window.__ModuleLoader__.load({
         dragHint: 'Drag to move · double-click to reset',
         collapse: 'Collapse',
         expand: 'Expand',
+        expandHint: 'Expand · double-click to reset',
         noTexture: 'texture not fetched',
         errAudio: 'Could not create an audio element: ',
         errPlay: 'Playback failed: ',
@@ -375,6 +398,7 @@ window.__ModuleLoader__.load({
         dragHint: '拖动可移动 · 双击复位',
         collapse: '收起',
         expand: '展开',
+        expandHint: '展开 · 双击复位',
         noTexture: '贴图未获取',
         errAudio: '无法创建音频对象：',
         errPlay: '播放失败：',
@@ -408,7 +432,33 @@ window.__ModuleLoader__.load({
         ? { left: s.pos.left + 'px', top: s.pos.top + 'px', right: 'auto', bottom: 'auto' }
         : null
 
-      return h('div', { className: 'vhm-ov' + (s.open ? '' : ' vhm-ov-min'), style: placed },
+      // Collapsed shows nothing but the villager's head: the figure doubles as
+      // the toggle, and drag/expand handlers live on it directly.
+      if (!s.open) {
+        return h('div', { className: 'vhm-ov vhm-ov-min', style: placed },
+          h('div', {
+            className: 'vhm-min',
+            title: t('expandHint'),
+            onPointerDown: onBarDown,
+            onPointerMove: onBarMove,
+            onPointerUp: onBarUp,
+            onPointerCancel: onBarUp,
+            onDoubleClick: onBarDoubleClick,
+            onClick: (event) => {
+              if (drag.moved) return
+              state.open = true; notify()
+            },
+          }, s.hasTexture
+            ? h('div', {
+                key: 'head-' + s.hitSeq,
+                className: 'vhm-min-face vhm-face' + (s.hitSeq > 0 ? ' vhm-min-hit' : ''),
+              }, FACE_PARTS.map((part, index) => h('i', { key: index, style: faceStyle(part) })))
+            : h('div', { className: 'vhm-min-face vhm-figure-missing' }, '?'),
+          ),
+        )
+      }
+
+      return h('div', { className: 'vhm-ov', style: placed },
         h('div', {
           className: 'vhm-bar',
           title: t('dragHint'),
@@ -607,6 +657,15 @@ const CSS = [
   'background:var(--dsw-alias-bg-overlay);box-shadow:0 10px 30px rgba(0,0,0,.3);',
   'color:var(--dsw-alias-label-primary);font-size:13px;line-height:1.55;overflow:hidden;}',
   '.vhm-ov-min{width:auto;}',
+  // Collapsed: a bare floating head, nothing but the villager's face.
+  '.vhm-ov-min{border:none;background:transparent;box-shadow:none;overflow:visible;}',
+  '.vhm-min{cursor:grab;touch-action:none;user-select:none;width:36px;height:40px;position:relative;',
+  'image-rendering:pixelated;filter:drop-shadow(0 3px 6px rgba(0,0,0,.4));transform-origin:50% 100%;}',
+  '.vhm-min:active{cursor:grabbing;}',
+  '.vhm-min:hover .vhm-min-face{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px;}',
+  '.vhm-min-face{position:absolute;inset:0;}',
+  '.vhm-min-face i{position:absolute;display:block;background-repeat:no-repeat;',
+  'background-image:url("/dsh-villager-hmm/texture.png");background-size:256px 256px;}',
   '.vhm-bar{display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--dsw-alias-bg-layer-2);',
   'cursor:grab;touch-action:none;user-select:none;}',
   '.vhm-bar:active{cursor:grabbing;}',
@@ -620,12 +679,20 @@ const CSS = [
   '.vhm-figure-missing{display:flex;align-items:center;justify-content:center;width:44px;height:44px;',
   'background:var(--dsw-alias-bg-layer-1);border-radius:8px;color:var(--dsw-alias-label-secondary);',
   'font-size:16px;}',
+  // The missing-texture placeholder inside the collapsed head needs a tighter
+  // box than the expanded figure's 44x44.
+  '.vhm-min .vhm-figure-missing{width:36px;height:40px;border-radius:10px;}',
   '.vhm-figure-hit{animation:vhm-bob .46s cubic-bezier(.36,.07,.19,.97);}',
   '@keyframes vhm-bob{0%{transform:translateY(0) scale(1) rotate(0)}',
   '16%{transform:translateY(-6px) scale(1.16) rotate(-7deg)}',
   '44%{transform:translateY(1px) scale(.95) rotate(5deg)}',
   '72%{transform:translateY(-2px) scale(1.04) rotate(-2deg)}',
   '100%{transform:translateY(0) scale(1) rotate(0)}}',
+  '.vhm-min-hit{animation:vhm-bob-min .46s cubic-bezier(.36,.07,.19,.97);}',
+  '@keyframes vhm-bob-min{0%{transform:translateY(0) scale(1)}',
+  '25%{transform:translateY(-5px) scale(1.18)}',
+  '60%{transform:translateY(1px) scale(.94)}',
+  '100%{transform:translateY(0) scale(1)}}',
   '.vhm-title{font-weight:600;font-size:12px;white-space:nowrap;}',
   '.vhm-count{font-size:11px;color:var(--dsw-alias-label-secondary);',
   'font-variant-numeric:tabular-nums;white-space:nowrap;}',

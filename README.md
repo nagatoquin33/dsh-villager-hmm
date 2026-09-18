@@ -27,6 +27,11 @@ so a bottom-anchored overlay would sit on top of the send button.
 └──────────────────────────────────────────────┘
 ```
 
+**Collapsed, the panel shrinks to nothing but the villager's head** (a
+36x40 crop of the face plus nose). Clicking the head expands the panel
+again; it still drags, and double-clicking still resets the corner. It
+bobs on every hmm, just like the full figure.
+
 The panel follows the interface language: it registers English and Chinese
 dictionaries with the shared `locale` service and re-renders when the locale
 changes. If that service is unavailable it falls back to English rather than
