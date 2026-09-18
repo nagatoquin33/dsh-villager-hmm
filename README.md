@@ -231,6 +231,22 @@ hmm sounds go through. The burst is derived from the pet counter through a hash
 rather than `Math.random()`, because the panel re-renders on every 250 ms poll
 and a fresh random set each time would make the hearts teleport mid-flight.
 
+The gestures are split deliberately, because a pet is a click and petting twice
+in a row is a `dblclick`:
+
+| Gesture | Effect |
+| --- | --- |
+| Click the villager | pet it |
+| Drag the villager | move the panel — 4px of travel before it counts as a drag |
+| Double-click the villager | two pets, and nothing else |
+| Double-click the bar chrome | send the panel back to its default corner |
+
+The villager swallows double-clicks instead of letting them reach the bar.
+Binding the reset to a double-click anywhere on the bar is what made a run of
+pets jump the panel to the top-right corner; the drag threshold is what stops a
+pixel of hand shake from being read as a drag, which both pinned the panel to a
+pixel position and swallowed the pet.
+
 The tint lives inside the `@keyframes`, never on the class that starts them.
 An element keeps its class after an animation ends, so a `filter` declared on
 `.vhm-pet` would leave the villager permanently red; and because `filter: url()`

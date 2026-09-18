@@ -772,6 +772,52 @@ const findFigure = (Panel, walk) => walk(Panel({})).find((node) =>
   && node.props.className.startsWith('vhm-figure')
   && typeof node.props.onClick === 'function')
 
+/** Park the panel by dragging the bar, and return the resulting inline style. */
+const parkPanel = (Panel, walk, dx = 200, dy = 100) => {
+  const bar = walk(Panel({})).find((node) => node.props.className === 'vhm-bar')
+  bar.props.onPointerDown({
+    target: null,
+    currentTarget: { getBoundingClientRect: () => ({ left: 0, top: 0 }), setPointerCapture: () => {} },
+    clientX: 10, clientY: 10, pointerId: 1,
+  })
+  bar.props.onPointerMove({ clientX: 10 + dx, clientY: 10 + dy })
+  bar.props.onPointerUp({ currentTarget: { releasePointerCapture: () => {} }, pointerId: 1 })
+  return Panel({}).props.style
+}
+
+await checkAsync('petting twice does not send the panel back to the corner', async () => {
+  const { Panel, walk } = renderPanel()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  const parked = parkPanel(Panel, walk)
+  assert.ok(parked, 'expected the panel to be pinned first')
+  // Two quick pets: the browser reports the second one as a dblclick, which used
+  // to reach the bar's reset handler and jump the panel to the top-right corner
+  // in the middle of a petting run.
+  const figure = findFigure(Panel, walk)
+  const swallowed = { count: 0 }
+  figure.props.onDoubleClick({ stopPropagation: () => { swallowed.count += 1 } })
+  assert.equal(swallowed.count, 1, 'the villager must swallow the double-click')
+  assert.deepEqual(Panel({}).props.style, parked, 'petting must not move the panel')
+})
+
+await checkAsync('a jittery click pets instead of dragging', async () => {
+  const { Panel, walk, audio } = renderPanel()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  const bar = walk(Panel({})).find((node) => node.props.className === 'vhm-bar')
+  bar.props.onPointerDown({
+    target: null,
+    currentTarget: { getBoundingClientRect: () => ({ left: 0, top: 0 }), setPointerCapture: () => {} },
+    clientX: 40, clientY: 20, pointerId: 1,
+  })
+  // One pixel of hand shake, under the drag threshold.
+  bar.props.onPointerMove({ clientX: 41, clientY: 21 })
+  assert.equal(Panel({}).props.style, null, 'one pixel must not pin the panel')
+  bar.props.onPointerUp({ currentTarget: { releasePointerCapture: () => {} }, pointerId: 1 })
+  findFigure(Panel, walk).props.onClick()
+  assert.equal(audio.length, 1, 'the pet must still register')
+  assert.equal(Panel({}).props.style, null, 'the pet must not move the panel')
+})
+
 await checkAsync('petting the villager plays a damage clip', async () => {
   const { Panel, walk, audio } = renderPanel()
   await new Promise((resolve) => setTimeout(resolve, 0))

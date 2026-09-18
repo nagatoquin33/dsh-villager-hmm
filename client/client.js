@@ -469,7 +469,16 @@ window.__ModuleLoader__.load({
       return { left: Math.max(0, Math.min(maxLeft, left)), top: Math.max(0, Math.min(maxTop, top)) }
     }
 
-    const drag = { active: false, moved: false, offsetX: 0, offsetY: 0 }
+    const drag = { active: false, moved: false, startX: 0, startY: 0, offsetX: 0, offsetY: 0 }
+
+    /**
+     * How far the pointer must travel before a press counts as a drag.
+     *
+     * Without it one pixel of hand shake flipped `moved`, which both swallowed
+     * the pet (`if (!drag.moved) pet()`) and pinned the panel to a pixel
+     * position — the "it shifts when I keep petting it" report.
+     */
+    const DRAG_THRESHOLD = 4
 
     const onBarDown = (event) => {
       // A control inside the bar must stay clickable, not start a drag.
@@ -478,6 +487,8 @@ window.__ModuleLoader__.load({
       const rect = event.currentTarget.getBoundingClientRect()
       drag.active = true
       drag.moved = false
+      drag.startX = event.clientX
+      drag.startY = event.clientY
       drag.offsetX = event.clientX - rect.left
       drag.offsetY = event.clientY - rect.top
       try { event.currentTarget.setPointerCapture(event.pointerId) } catch (error) { /* optional */ }
@@ -485,7 +496,12 @@ window.__ModuleLoader__.load({
 
     const onBarMove = (event) => {
       if (!drag.active) return
-      drag.moved = true
+      if (!drag.moved) {
+        const travelled = Math.abs(event.clientX - drag.startX) >= DRAG_THRESHOLD
+          || Math.abs(event.clientY - drag.startY) >= DRAG_THRESHOLD
+        if (!travelled) return
+        drag.moved = true
+      }
       merge({ pos: clampPosition(event.clientX - drag.offsetX, event.clientY - drag.offsetY) })
     }
 
@@ -496,10 +512,21 @@ window.__ModuleLoader__.load({
       savePosition(state.pos)
     }
 
-    /** Double-clicking the bar returns the panel to its default corner. */
+    /**
+     * Double-clicking the bar chrome returns the panel to its default corner.
+     *
+     * Deliberately NOT reachable from the villager. A pet is a click, so petting
+     * twice in a row made the browser fire `dblclick`, and the panel jumped to
+     * the top-right corner in the middle of a petting run.
+     */
     const onBarDoubleClick = () => {
       merge({ pos: null })
       savePosition(null)
+    }
+
+    /** Swallow a double-click: on the villager it is simply two pets. */
+    const onVillagerDoubleClick = (event) => {
+      if (event && typeof event.stopPropagation === 'function') event.stopPropagation()
     }
 
     state.pos = loadPosition()
@@ -543,7 +570,7 @@ window.__ModuleLoader__.load({
         assetsCache: 'Cache',
         autoplayBlocked: 'The browser blocked autoplay — click anywhere on the page to unlock.',
         invalidPattern: 'Invalid pattern: ',
-        dragHint: 'Drag to move · double-click to reset',
+        dragHint: 'Drag to move · double-click the bar to reset',
         collapse: 'Collapse',
         expand: 'Expand',
         noTexture: 'texture not fetched',
@@ -583,7 +610,7 @@ window.__ModuleLoader__.load({
         assetsCache: '缓存目录',
         autoplayBlocked: '⚠️ 浏览器拦截了自动播放：在页面上点一下任意位置即可解锁。',
         invalidPattern: '正则无效：',
-        dragHint: '拖动可移动 · 双击复位',
+        dragHint: '拖动可移动 · 双击标题栏复位',
         collapse: '收起',
         expand: '展开',
         noTexture: '贴图未获取',
@@ -632,6 +659,7 @@ window.__ModuleLoader__.load({
             // in the base skin's under-robe, which is worth saying out loud.
             title: s.hasType ? t('petHint') : t('noType'),
             onClick: () => { if (!drag.moved) pet() },
+            onDoubleClick: onVillagerDoubleClick,
           }, [
             // The pet tint goes on this inner box, not on `.vhm-figure`, so the
             // burst below is a sibling rather than a descendant — inside it the
@@ -664,7 +692,7 @@ window.__ModuleLoader__.load({
               onPointerMove: onBarMove,
               onPointerUp: onBarUp,
               onPointerCancel: onBarUp,
-              onDoubleClick: onBarDoubleClick,
+              onDoubleClick: onVillagerDoubleClick,
               onClick: () => { if (!drag.moved) pet() },
             }, [
               s.hasTexture
