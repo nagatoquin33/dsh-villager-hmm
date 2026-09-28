@@ -47,6 +47,13 @@ That is the whole install. The package declares `dsh.bundle`, so `dsh plugin`
 registers it as a profile layer by itself — there is no configuration file to
 edit. Restart the profile when it finishes.
 
+Never install into a profile with plain `npm install` / `npm update`: profiles
+are pnpm workspaces managed by the harness, and a package that arrives outside
+that flow is invisible to the host's enumeration — the plugin loads on neither
+side, with no error anywhere (the panel just never appears). If that happened,
+`dsh plugin --profile web remove dsh-villager-hmm` followed by the `add` above
+repairs it.
+
 Then fetch the assets, from the profile directory (where the package's `bin` is
 linked):
 
