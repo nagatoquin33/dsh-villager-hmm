@@ -28,9 +28,9 @@ so a bottom-anchored overlay would sit on top of the send button.
 ```
 
 **Collapsed, the panel shrinks to nothing but the villager's head** (a
-36x40 crop of the face plus nose). Clicking the head expands the panel
-again; it still drags, and double-clicking still resets the corner. It
-bobs on every hmm, just like the full figure.
+32x44 crop of the face plus nose). Clicking the head pets the villager; the
+small `▣` button under it restores the full panel. The head still drags, and
+it bobs on every hmm, just like the full figure. See "Petting" below.
 
 The panel follows the interface language: it registers English and Chinese
 dictionaries with the shared `locale` service and re-renders when the locale
@@ -224,12 +224,16 @@ head is a pet:
   separate controls on purpose: folding both onto the head's click is what made
   the head unpetable in the first place.
 
-The expanded panel's body reacts to a click the same way, so the villager can be
-petted in either form. Neither path touches the host: a pet plays a damage clip
-straight away rather than waiting behind the rate-limited queue that the ambient
-hmm sounds go through. The burst is derived from the pet counter through a hash
-rather than `Math.random()`, because the panel re-renders on every 250 ms poll
-and a fresh random set each time would make the hearts teleport mid-flight.
+The expanded panel's body reacts to a press the same way, so the villager can
+be petted in either form. In the expanded form the pet fires from `pointerup`
+rather than `click`: the drag bar captures the pointer on `pointerdown`, and a
+pointer capture retargets the click that follows to the bar, so a click handler
+on the villager never runs (verified against headless Chromium). Neither path
+touches the host: a pet plays a damage clip straight away rather than waiting
+behind the rate-limited queue that the ambient hmm sounds go through. The burst
+is derived from the pet counter through a hash rather than `Math.random()`,
+because the panel re-renders on every 250 ms poll and a fresh random set each
+time would make the hearts teleport mid-flight.
 
 The gestures are split deliberately, because a pet is a click and petting twice
 in a row is a `dblclick`:
@@ -241,11 +245,13 @@ in a row is a `dblclick`:
 | Double-click the villager | two pets, and nothing else |
 | Double-click the bar chrome | send the panel back to its default corner |
 
-The villager swallows double-clicks instead of letting them reach the bar.
-Binding the reset to a double-click anywhere on the bar is what made a run of
-pets jump the panel to the top-right corner; the drag threshold is what stops a
-pixel of hand shake from being read as a drag, which both pinned the panel to a
-pixel position and swallowed the pet.
+The villager swallows double-clicks instead of letting them reach the bar, and
+because the capture retargets those to the bar as well, a double-click reset
+that lands within 600 ms of a pet is ignored too. Binding the reset to a
+double-click anywhere on the bar is what made a run of pets jump the panel to
+the top-right corner; the drag threshold is what stops a pixel of hand shake
+from being read as a drag, which both pinned the panel to a pixel position and
+swallowed the pet.
 
 The tint lives inside the `@keyframes`, never on the class that starts them.
 An element keeps its class after an animation ends, so a `filter` declared on

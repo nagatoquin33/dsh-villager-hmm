@@ -116,6 +116,33 @@ const FIGURE_BOX = { w: FIGURE_EXTENT.w * FIGURE_SCALE, h: FIGURE_EXTENT.h * FIG
 const FACE_BOX = { w: FACE_EXTENT.w * FACE_SCALE, h: FACE_EXTENT.h * FACE_SCALE }
 
 /**
+ * The expanded panel's box. The width is the stylesheet's — shared here so the
+ * two cannot drift apart — and the height is only a fallback for environments
+ * where the live element cannot be measured; clamping prefers the measured box.
+ */
+const PANEL_W = 400
+const PANEL_H = 560
+/** Breathing room a clamped box keeps from the viewport edge. */
+const EDGE_MARGIN = 8
+
+const isNum = (value) => typeof value === 'number' && Number.isFinite(value)
+
+/**
+ * Clamp a top-left position so a box of the given size stays inside the
+ * viewport, with a small margin. The size is the LIVE box of whatever form the
+ * overlay is in — the collapsed head is roughly 32x63, the expanded panel 400 x
+ * its measured height — which is what makes "drag the head to the edge, then
+ * expand" land inside the window instead of off it.
+ */
+const clampPosition = (left, top, width, height) => {
+  const vw = typeof window !== 'undefined' && isNum(window.innerWidth) ? window.innerWidth : 0
+  const vh = typeof window !== 'undefined' && isNum(window.innerHeight) ? window.innerHeight : 0
+  const maxLeft = vw > 0 ? Math.max(0, vw - width - EDGE_MARGIN) : left
+  const maxTop = vh > 0 ? Math.max(0, vh - height - EDGE_MARGIN) : top
+  return { left: Math.max(0, Math.min(maxLeft, left)), top: Math.max(0, Math.min(maxTop, top)) }
+}
+
+/**
  * The damage-indicator burst a pet throws.
  *
  * The game spawns `minecraft:damage_indicator` when something takes damage: a
@@ -179,7 +206,7 @@ window.__ModuleLoader__.load({
 
     const React = require('react')
     const h = React.createElement
-    const { useState, useEffect } = React
+    const { useState, useEffect, useRef, useLayoutEffect } = React
 
     /** HTTP prefix owned by this plugin's host half. */
     const PREFIX = '/dsh-villager-hmm'
@@ -330,11 +357,14 @@ window.__ModuleLoader__.load({
      * The red tint lives inside the keyframes rather than in the class that
      * starts them, so it cannot outlive the animation and leave the villager
      * permanently dyed. `lastAnim` is what stops a later hmm hit from replaying
-     * the pet animation (the remount key changes for both).
+     * the pet animation (the remount key changes for both). `lastPetAt` is read
+     * by the bar's double-click reset: two quick pets reach it as a dblclick.
      */
+    let lastPetAt = 0
     const pet = () => {
       state.petSeq += 1
       state.lastAnim = 'pet'
+      lastPetAt = Date.now()
       playHurt()
       notify()
     }
@@ -460,16 +490,10 @@ window.__ModuleLoader__.load({
       }
     }
 
-    /** Keep the panel reachable: never fully off the top or left edge. */
-    const clampPosition = (left, top) => {
-      const width = typeof window !== 'undefined' && isNum(window.innerWidth) ? window.innerWidth : 0
-      const height = typeof window !== 'undefined' && isNum(window.innerHeight) ? window.innerHeight : 0
-      const maxLeft = width > 0 ? Math.max(0, width - 80) : left
-      const maxTop = height > 0 ? Math.max(0, height - 44) : top
-      return { left: Math.max(0, Math.min(maxLeft, left)), top: Math.max(0, Math.min(maxTop, top)) }
-    }
+    // clampPosition lives at module scope so the tests can probe it; the
+    // handlers below clamp against the overlay's live box (see onBarMove).
 
-    const drag = { active: false, moved: false, startX: 0, startY: 0, offsetX: 0, offsetY: 0 }
+    const drag = { active: false, moved: false, onFigure: false, startX: 0, startY: 0, offsetX: 0, offsetY: 0 }
 
     /**
      * How far the pointer must travel before a press counts as a drag.
@@ -491,6 +515,12 @@ window.__ModuleLoader__.load({
       drag.startY = event.clientY
       drag.offsetX = event.clientX - rect.left
       drag.offsetY = event.clientY - rect.top
+      // Whether this press began on the pettable villager. The pointer capture
+      // below hands the click that follows to this bar, so the figure's own
+      // click handler is dead code in a real browser — the pet has to fire
+      // from onBarUp instead.
+      drag.onFigure = !!(target && typeof target.closest === 'function'
+        && target.closest('.vhm-figure:not(.vhm-figure-missing)'))
       try { event.currentTarget.setPointerCapture(event.pointerId) } catch (error) { /* optional */ }
     }
 
@@ -502,7 +532,16 @@ window.__ModuleLoader__.load({
         if (!travelled) return
         drag.moved = true
       }
-      merge({ pos: clampPosition(event.clientX - drag.offsetX, event.clientY - drag.offsetY) })
+      // Clamp against the overlay's live box: the expanded panel is 400px wide
+      // and much taller than the head, so clamping with head-sized margins
+      // would let it hang halfway out of the window.
+      const root = event.currentTarget && typeof event.currentTarget.closest === 'function'
+        ? event.currentTarget.closest('.vhm-ov')
+        : null
+      const rect = root ? root.getBoundingClientRect() : null
+      const boxW = rect && rect.width > 0 ? rect.width : (state.open ? PANEL_W : FACE_BOX.w)
+      const boxH = rect && rect.height > 0 ? rect.height : (state.open ? PANEL_H : FACE_BOX.h + 24)
+      merge({ pos: clampPosition(event.clientX - drag.offsetX, event.clientY - drag.offsetY, boxW, boxH) })
     }
 
     const onBarUp = (event) => {
@@ -510,6 +549,11 @@ window.__ModuleLoader__.load({
       drag.active = false
       try { event.currentTarget.releasePointerCapture(event.pointerId) } catch (error) { /* optional */ }
       savePosition(state.pos)
+      // A press on the villager that never became a drag is a pet: the capture
+      // retargeted the click to this bar, so this is the only handler that
+      // still sees the gesture.
+      if (drag.onFigure && !drag.moved) pet()
+      drag.onFigure = false
     }
 
     /**
@@ -520,6 +564,10 @@ window.__ModuleLoader__.load({
      * the top-right corner in the middle of a petting run.
      */
     const onBarDoubleClick = () => {
+      // Two quick pets land here as a dblclick (the capture retargets that to
+      // the bar as well), and a reset mid-petting-run reads as the panel
+      // vanishing — so a fresh pet suppresses it.
+      if (Date.now() - lastPetAt < 600) return
       merge({ pos: null })
       savePosition(null)
     }
@@ -649,6 +697,22 @@ window.__ModuleLoader__.load({
 
     function Overlay() {
       const s = useStore()
+      const rootRef = useRef(null)
+
+      // Re-clamp the pinned position against the live box after every render.
+      // This is what pulls an expanded panel back on screen when the head was
+      // parked against an edge (the stored position fits the head, not the
+      // panel), and what survives a window resize. It converges: once the
+      // position fits, the effect stops merging.
+      useLayoutEffect(() => {
+        const el = rootRef.current
+        if (!el || !s.pos) return
+        const rect = el.getBoundingClientRect()
+        if (!rect.width || !rect.height) return
+        const clamped = clampPosition(s.pos.left, s.pos.top, rect.width, rect.height)
+        if (clamped.left !== s.pos.left || clamped.top !== s.pos.top) merge({ pos: clamped })
+      })
+
       const layers = textureLayers(s.hasType)
       const figure = s.hasTexture
         ? h('div', {
@@ -658,7 +722,8 @@ window.__ModuleLoader__.load({
             // The robe comes from the overlay; without it the villager is drawn
             // in the base skin's under-robe, which is worth saying out loud.
             title: s.hasType ? t('petHint') : t('noType'),
-            onClick: () => { if (!drag.moved) pet() },
+            // No onClick here on purpose: the bar's pointer capture retargets
+            // the click to the bar, so the pet fires from onBarUp instead.
             onDoubleClick: onVillagerDoubleClick,
           }, [
             // The pet tint goes on this inner box, not on `.vhm-figure`, so the
@@ -683,7 +748,7 @@ window.__ModuleLoader__.load({
       // the villager. Restoring the panel therefore needs its own control —
       // folding that onto the head's click is what made the head unpetable.
       if (!s.open) {
-        return h('div', { className: 'vhm-ov vhm-ov-min', style: placed },
+        return h('div', { className: 'vhm-ov vhm-ov-min', style: placed, ref: rootRef },
           h('div', { className: 'vhm-min-wrap' },
             h('div', {
               className: 'vhm-min',
@@ -715,7 +780,7 @@ window.__ModuleLoader__.load({
         )
       }
 
-      return h('div', { className: 'vhm-ov', style: placed },
+      return h('div', { className: 'vhm-ov', style: placed, ref: rootRef },
         h('div', {
           className: 'vhm-bar',
           title: t('dragHint'),
@@ -938,7 +1003,7 @@ const CSS = [
   // Anchored top-right, not bottom-right: the composer is full-width, so any
   // bottom-anchored overlay lands on the send button. A dragged position
   // overrides this anchor through inline left/top.
-  '.vhm-ov{position:fixed;top:76px;right:16px;z-index:60;width:400px;max-width:calc(100vw - 32px);',
+  '.vhm-ov{position:fixed;top:76px;right:16px;z-index:60;width:' + PANEL_W + 'px;max-width:calc(100vw - 32px);',
   'pointer-events:auto;border:1px solid var(--dsw-alias-border-l2);border-radius:14px;',
   'background:var(--dsw-alias-bg-overlay);box-shadow:0 10px 30px rgba(0,0,0,.3);',
   'color:var(--dsw-alias-label-primary);font-size:13px;line-height:1.55;overflow:hidden;}',

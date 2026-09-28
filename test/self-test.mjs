@@ -363,11 +363,15 @@ check('materializes into a cordis client plugin', () => {
  * the source can hand it back. It is the only way to test the box-UV crops:
  * they never reach the React tree in a form the fake renderer can read.
  */
-const geometry = () => new Function(
-  'window', 'document', 'fetch', 'Audio', 'setInterval', 'clearInterval',
-  source + '\n;return { FIGURE_PARTS, FIGURE_EXTENT, FACE_PARTS, FACE_EXTENT, partStyle,'
-    + ' FIGURE_BOX, FACE_BOX, PARTICLE_COUNT, particleBurst, particleStyle }',
-)(fakeWindow, fakeDocument, () => Promise.resolve({ ok: false }), function Audio() {}, () => 0, () => {})
+const geometry = (extraWindow) => {
+  // A probe may override viewport fields; the loader shape always stays.
+  const win = extraWindow ? Object.assign({}, fakeWindow, extraWindow) : fakeWindow
+  return new Function(
+    'window', 'document', 'fetch', 'Audio', 'setInterval', 'clearInterval',
+    source + '\n;return { FIGURE_PARTS, FIGURE_EXTENT, FACE_PARTS, FACE_EXTENT, partStyle,'
+      + ' FIGURE_BOX, FACE_BOX, PANEL_W, PANEL_H, clampPosition, PARTICLE_COUNT, particleBurst, particleStyle }',
+  )(win, fakeDocument, () => Promise.resolve({ ok: false }), function Audio() {}, () => 0, () => {})
+}
 
 check('draws exactly the cubes of the villager model', () => {
   const g = geometry()
@@ -458,6 +462,28 @@ check('throws a deterministic damage-indicator burst', () => {
     // size the collapsed head renders at.
     assert.ok(parseInt(particle.size, 10) >= 7, 'particles must stay legible')
   }
+})
+
+check('clamps a parked position against the live box', () => {
+  const g = geometry({ innerWidth: 800, innerHeight: 600 })
+  // The head was dragged against the right edge and then the panel expanded:
+  // the panel's box, not the head's, decides where its top-left may sit. This
+  // is the "expanded panel hangs out of the window" report.
+  assert.deepEqual(
+    g.clampPosition(760, 40, g.PANEL_W, 505),
+    { left: 392, top: 40 },
+    'an expanded panel must slide back inside the right edge',
+  )
+  // The collapsed head never hides past an edge either — bottom included,
+  // because the head carries its own expand button below the face.
+  assert.deepEqual(
+    g.clampPosition(790, 560, 32, 63),
+    { left: 760, top: 529 },
+    'the collapsed head must stay inside the bottom edge',
+  )
+  // Without a measurable viewport the position passes through untouched.
+  const blind = geometry()
+  assert.deepEqual(blind.clampPosition(12, 34, g.PANEL_W, 505), { left: 12, top: 34 })
 })
 
 /**
@@ -620,6 +646,8 @@ const renderPanel = (locale) => {
     createElement: (type, props, ...children) => ({ type, props: props || {}, children: children.flat() }),
     useState: (initial) => [typeof initial === 'function' ? initial() : initial, () => {}],
     useEffect: () => {},
+    useRef: () => ({ current: null }),
+    useLayoutEffect: () => {},
   }
   const walk = (node, out = []) => {
     if (node === null || node === undefined) return out
@@ -766,11 +794,40 @@ await checkAsync('double-clicking the bar restores the default corner', async ()
   assert.equal(Panel({}).props.style, null, 'double-click must clear the pinned position')
 })
 
-/** The pettable body: `.vhm-figure` carrying the click handler. */
-const findFigure = (Panel, walk) => walk(Panel({})).find((node) =>
+/**
+ * A press on the villager, replayed the way the browser actually delivers it.
+ *
+ * The pointerdown bubbles to the bar, whose handler captures the pointer — and
+ * a pointer capture retargets every event that follows to the bar, so the
+ * figure's own click handler never runs in a real browser. Verified against
+ * headless Chromium: `pointerdown: target=fig`, then `pointerup` and `click`
+ * both land on the bar. A pet therefore has to survive this exact path.
+ */
+const barStub = {
+  getBoundingClientRect: () => ({ left: 0, top: 0 }),
+  setPointerCapture: () => {},
+  releasePointerCapture: () => {},
+  closest: () => null,
+}
+const villagerTarget = {
+  closest: (selector) => (selector.includes('vhm-figure') ? { className: 'vhm-figure' } : null),
+}
+const petVillager = (Panel, walk, move = null) => {
+  const bar = walk(Panel({})).find((node) => node.props.className === 'vhm-bar')
+  bar.props.onPointerDown({
+    target: villagerTarget,
+    currentTarget: barStub,
+    clientX: 40, clientY: 20, pointerId: 1,
+  })
+  if (move) bar.props.onPointerMove(move)
+  bar.props.onPointerUp({ currentTarget: barStub, pointerId: 1 })
+}
+
+/** The figure node, found by its double-click swallow rather than a click. */
+const findFigureNode = (Panel, walk) => walk(Panel({})).find((node) =>
   typeof node.props.className === 'string'
   && node.props.className.startsWith('vhm-figure')
-  && typeof node.props.onClick === 'function')
+  && typeof node.props.onDoubleClick === 'function')
 
 /** Park the panel by dragging the bar, and return the resulting inline style. */
 const parkPanel = (Panel, walk, dx = 200, dy = 100) => {
@@ -790,40 +847,51 @@ await checkAsync('petting twice does not send the panel back to the corner', asy
   await new Promise((resolve) => setTimeout(resolve, 0))
   const parked = parkPanel(Panel, walk)
   assert.ok(parked, 'expected the panel to be pinned first')
-  // Two quick pets: the browser reports the second one as a dblclick, which used
-  // to reach the bar's reset handler and jump the panel to the top-right corner
+  // Two quick pets: the capture retargets the dblclick to the bar too, which
+  // used to reach the reset handler and jump the panel to the top-right corner
   // in the middle of a petting run.
-  const figure = findFigure(Panel, walk)
-  const swallowed = { count: 0 }
-  figure.props.onDoubleClick({ stopPropagation: () => { swallowed.count += 1 } })
-  assert.equal(swallowed.count, 1, 'the villager must swallow the double-click')
+  petVillager(Panel, walk)
+  petVillager(Panel, walk)
   assert.deepEqual(Panel({}).props.style, parked, 'petting must not move the panel')
+  const bar = walk(Panel({})).find((node) => node.props.className === 'vhm-bar')
+  bar.props.onDoubleClick()
+  assert.deepEqual(
+    Panel({}).props.style, parked,
+    'the dblclick a petting run produces must not reset the panel',
+  )
+  // Where the click does reach the figure (engines without pointer capture),
+  // the villager still swallows the dblclick instead of bubbling it.
+  const figure = findFigureNode(Panel, walk)
+  assert.ok(figure, 'the villager lost its double-click swallow')
+  let swallowed = false
+  figure.props.onDoubleClick({ stopPropagation: () => { swallowed = true } })
+  assert.ok(swallowed, 'the villager must swallow the double-click')
+  assert.deepEqual(Panel({}).props.style, parked, 'swallowing must not move the panel')
 })
 
 await checkAsync('a jittery click pets instead of dragging', async () => {
   const { Panel, walk, audio } = renderPanel()
   await new Promise((resolve) => setTimeout(resolve, 0))
-  const bar = walk(Panel({})).find((node) => node.props.className === 'vhm-bar')
-  bar.props.onPointerDown({
-    target: null,
-    currentTarget: { getBoundingClientRect: () => ({ left: 0, top: 0 }), setPointerCapture: () => {} },
-    clientX: 40, clientY: 20, pointerId: 1,
-  })
   // One pixel of hand shake, under the drag threshold.
-  bar.props.onPointerMove({ clientX: 41, clientY: 21 })
-  assert.equal(Panel({}).props.style, null, 'one pixel must not pin the panel')
-  bar.props.onPointerUp({ currentTarget: { releasePointerCapture: () => {} }, pointerId: 1 })
-  findFigure(Panel, walk).props.onClick()
+  petVillager(Panel, walk, { clientX: 41, clientY: 21 })
   assert.equal(audio.length, 1, 'the pet must still register')
-  assert.equal(Panel({}).props.style, null, 'the pet must not move the panel')
+  assert.equal(Panel({}).props.style, null, 'the pet must not pin the panel')
+})
+
+await checkAsync('petting works right after the panel was dragged', async () => {
+  const { Panel, walk, audio } = renderPanel()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  parkPanel(Panel, walk)
+  // The drag left `moved` set from its own gesture; a fresh press must reset
+  // it, or the pet after a drag would be swallowed forever.
+  petVillager(Panel, walk)
+  assert.equal(audio.length, 1, 'a pet after a drag must still play, got ' + audio.length)
 })
 
 await checkAsync('petting the villager plays a damage clip', async () => {
   const { Panel, walk, audio } = renderPanel()
   await new Promise((resolve) => setTimeout(resolve, 0))
-  const figure = findFigure(Panel, walk)
-  assert.ok(figure, 'the figure does not accept a click')
-  figure.props.onClick()
+  petVillager(Panel, walk)
   assert.equal(audio.length, 1, 'a pet must play exactly one clip, played ' + audio.length)
   assert.ok(
     /\/hurt\/\d+\.ogg$/.test(audio[0]),
@@ -834,10 +902,9 @@ await checkAsync('petting the villager plays a damage clip', async () => {
 await checkAsync('a pet does not wait behind hmm hits', async () => {
   const { Panel, walk, audio } = renderPanel()
   await new Promise((resolve) => setTimeout(resolve, 0))
-  const figure = findFigure(Panel, walk)
-  figure.props.onClick()
-  figure.props.onClick()
-  figure.props.onClick()
+  petVillager(Panel, walk)
+  petVillager(Panel, walk)
+  petVillager(Panel, walk)
   // Ambient clips go through a rate-limited queue; a pet answers a click, so
   // three pets have to be three clips.
   assert.equal(audio.length, 3, 'expected three clips, got ' + audio.length)
@@ -874,7 +941,7 @@ await checkAsync('a pet throws the hearts and an idle panel carries none', async
   const layersIn = (nodes) => nodes.filter((node) =>
     typeof node.props.className === 'string' && node.props.className === 'vhm-particles')
   assert.equal(layersIn(walk(Panel({}))).length, 0, 'an idle panel must not carry a burst')
-  findFigure(Panel, walk).props.onClick()
+  petVillager(Panel, walk)
   // One tree, one render: Panel({}) rebuilds every node, so identity only holds
   // within a single walk.
   const tree = walk(Panel({}))
